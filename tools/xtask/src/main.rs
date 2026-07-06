@@ -38,8 +38,7 @@ fn main() {
 /// rebuilt with the model; otherwise only BOOTX64.EFI is refreshed.
 fn build_image(fresh: bool) -> PathBuf {
     let root = root();
-    build_and_stage();
-    let efi = root.join("target/x86_64-unknown-uefi/release/nr-boot.efi");
+    let (_, efi) = build_and_stage();
     let img = root.join("nightrun.img");
     if !fresh && img.exists() && image::update_efi(&img, &efi) {
         println!("updated BOOTX64.EFI in {}", img.display());
@@ -58,29 +57,36 @@ fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
 }
 
-fn build_and_stage() -> PathBuf {
+fn build_and_stage() -> (PathBuf, PathBuf) {
     let root = root();
-    let status = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
+    // Custom hard-float UEFI target (the builtin one is soft-float, which
+    // both breaks AVX intrinsics and would cripple f32 math), so build
+    // core/alloc from source on nightly.
+    let status = Command::new("cargo")
         .current_dir(&root)
+        .env_remove("CARGO") // don't let the outer stable cargo leak in
         .args([
+            "+nightly",
             "build",
             "--release",
             "-p",
             "nr-boot",
+            "-Zbuild-std=core,alloc",
+            "-Zjson-target-spec",
             "--target",
-            "x86_64-unknown-uefi",
+            "x86_64-nightrun-uefi.json",
         ])
         .status()
-        .expect("run cargo");
+        .expect("run cargo (is nightly installed? rustup toolchain install nightly --component rust-src)");
     assert!(status.success(), "nr-boot build failed");
 
-    let efi = root.join("target/x86_64-unknown-uefi/release/nr-boot.efi");
+    let efi = root.join("target/x86_64-nightrun-uefi/release/nr-boot.efi");
     let esp = root.join("target/esp");
     let boot_dir = esp.join("EFI/BOOT");
     std::fs::create_dir_all(&boot_dir).unwrap();
     std::fs::copy(&efi, boot_dir.join("BOOTX64.EFI")).unwrap();
     println!("staged {}", esp.display());
-    esp
+    (esp, efi)
 }
 
 #[derive(Default)]
@@ -128,7 +134,7 @@ fn run(opts: RunOpts) {
         let img = build_image(false);
         format!("format=raw,file={}", img.display())
     } else {
-        let esp = build_and_stage();
+        let (esp, _) = build_and_stage();
         format!("format=raw,file=fat:rw:{}", esp.display())
     };
     let target = root.join("target");

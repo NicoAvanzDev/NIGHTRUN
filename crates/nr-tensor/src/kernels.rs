@@ -50,6 +50,75 @@ pub fn dot_q8_scalar(w: &[BlockQ8_0], x: &[BlockQ8_0]) -> f32 {
     sum
 }
 
+/// dot(k, q) where `k` holds f16 bits (KV cache) and `q` is f32.
+pub fn dot_f16(k: &[u16], q: &[f32]) -> f32 {
+    if cpu::features().f16c && cpu::fast_path() {
+        // SAFETY: F16C+AVX2+FMA verified.
+        unsafe { dot_f16_f16c(k, q) }
+    } else {
+        let mut s = 0f32;
+        for (&kb, &qv) in k.iter().zip(q) {
+            s += crate::f16::f16_to_f32(kb) * qv;
+        }
+        s
+    }
+}
+
+/// out += a * v where `v` holds f16 bits (KV cache values row).
+pub fn axpy_f16(out: &mut [f32], a: f32, v: &[u16]) {
+    if cpu::features().f16c && cpu::fast_path() {
+        // SAFETY: F16C+AVX2+FMA verified.
+        unsafe { axpy_f16_f16c(out, a, v) };
+    } else {
+        for (o, &vb) in out.iter_mut().zip(v) {
+            *o += a * crate::f16::f16_to_f32(vb);
+        }
+    }
+}
+
+#[target_feature(enable = "avx2,fma,f16c")]
+unsafe fn dot_f16_f16c(k: &[u16], q: &[f32]) -> f32 {
+    use core::arch::x86_64::*;
+    let n = k.len().min(q.len());
+    let mut acc = _mm256_setzero_ps();
+    let chunks = n / 8;
+    for i in 0..chunks {
+        let kh = _mm_loadu_si128(k.as_ptr().add(i * 8) as *const __m128i);
+        let kf = _mm256_cvtph_ps(kh);
+        let qf = _mm256_loadu_ps(q.as_ptr().add(i * 8));
+        acc = _mm256_fmadd_ps(kf, qf, acc);
+    }
+    let mut sum = {
+        let hi = _mm256_extractf128_ps(acc, 1);
+        let lo = _mm256_castps256_ps128(acc);
+        let s = _mm_add_ps(hi, lo);
+        let s = _mm_add_ps(s, _mm_movehl_ps(s, s));
+        let s = _mm_add_ss(s, _mm_shuffle_ps(s, s, 1));
+        _mm_cvtss_f32(s)
+    };
+    for i in chunks * 8..n {
+        sum += crate::f16::f16_to_f32(k[i]) * q[i];
+    }
+    sum
+}
+
+#[target_feature(enable = "avx2,fma,f16c")]
+unsafe fn axpy_f16_f16c(out: &mut [f32], a: f32, v: &[u16]) {
+    use core::arch::x86_64::*;
+    let n = out.len().min(v.len());
+    let av = _mm256_set1_ps(a);
+    let chunks = n / 8;
+    for i in 0..chunks {
+        let vh = _mm_loadu_si128(v.as_ptr().add(i * 8) as *const __m128i);
+        let vf = _mm256_cvtph_ps(vh);
+        let of = _mm256_loadu_ps(out.as_ptr().add(i * 8));
+        _mm256_storeu_ps(out.as_mut_ptr().add(i * 8), _mm256_fmadd_ps(av, vf, of));
+    }
+    for i in chunks * 8..n {
+        out[i] += a * crate::f16::f16_to_f32(v[i]);
+    }
+}
+
 #[target_feature(enable = "avx2,fma")]
 pub unsafe fn dot_q8_avx2(w: &[BlockQ8_0], x: &[BlockQ8_0]) -> f32 {
     use core::arch::x86_64::*;

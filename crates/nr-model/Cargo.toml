@@ -12,3 +12,6 @@ std = ["nr-tensor/std"]
 libm = "0.2"
 nr-tensor = { path = "../nr-tensor", default-features = false }
 nr-token = { path = "../nr-token", default-features = false }
+
+[dev-dependencies]
+nr-token = { path = "../nr-token" }

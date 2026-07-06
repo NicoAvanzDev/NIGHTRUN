@@ -1,14 +1,11 @@
-//! Application shell: splash -> boot sequence (real model load) -> chat.
-//!
-//! M4 status: the model is loaded, checksummed and parsed, and the real
-//! tokenizer runs; chat replies demonstrate tokenization until the
-//! inference engine lands (M5).
+//! Application shell: splash -> boot sequence (real model load) -> chat
+//! with local Llama inference.
 
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::time::Duration;
 
-use nr_model::Model;
+use nr_model::{InferCtx, Model, Sampler};
 use nr_runtime::{Arena, Clock};
 use nr_token::Tokenizer;
 use nr_ui::chat::{Role, Stats, Turn};
@@ -21,6 +18,9 @@ use crate::input::{self, InputEvent};
 use crate::video::Display;
 
 const ARENA_MB: usize = 256;
+const CTX_LEN: usize = 4096;
+const MAX_GEN_TOKENS: usize = 768;
+const SYSTEM_PROMPT: &str = "You are NightRun, a helpful assistant running Llama 3.2 fully offline on bare-metal x86_64 hardware - no operating system underneath. Be concise and friendly.";
 
 fn stall_us(us: u64) {
     boot::stall(Duration::from_micros(us));
@@ -32,9 +32,11 @@ pub struct Platform {
     pub clock: Clock,
     pub arena: Arena,
     pub ram_mb: u32,
-    pub model: Model<'static>,
+    pub model: &'static Model<'static>,
     pub tokenizer: Tokenizer<'static>,
     pub model_name: String,
+    pub infer: InferCtx<'static>,
+    pub sampler: Sampler,
 }
 
 pub fn run(display: Display) {
@@ -69,7 +71,7 @@ const STAGES: &[&str] = &[
     "scanning memory",
     "loading model into RAM",
     "verifying checksums",
-    "allocating resident arena",
+    "preparing inference engine",
     "starting chat interface",
 ];
 
@@ -167,7 +169,9 @@ fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx
         model.meta.n_layers
     );
 
-    // Stage 4: arena.
+    // Stage 4: arena + inference context (KV cache, scratch buffers).
+    let need = InferCtx::required_bytes(&model, CTX_LEN);
+    assert!(need < ARENA_MB * 1024 * 1024, "arena too small for ctx");
     let pages = ARENA_MB * 1024 * 1024 / 4096;
     let base = match boot::allocate_pages(AllocateType::AnyPages, MemoryType::LOADER_DATA, pages) {
         Ok(b) => b,
@@ -178,9 +182,25 @@ fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx
     for off in (0..pages * 4096).step_by(16 * 1024 * 1024) {
         let len = (16 * 1024 * 1024).min(pages * 4096 - off);
         unsafe { core::ptr::write_bytes(base.as_ptr().add(off), 0, len) };
-        ui.show(4, ((off + len) * 1000 / (pages * 4096)) as u32, &alloc::format!("{ARENA_MB} MB resident arena"));
+        ui.show(4, ((off + len) * 500 / (pages * 4096)) as u32, &alloc::format!("{ARENA_MB} MB resident arena"));
     }
-    let _ = arena.alloc_bytes(64, 64);
+
+    // The model must outlive the InferCtx that borrows it; both live for
+    // the whole session.
+    let model: &'static Model<'static> = alloc::boxed::Box::leak(alloc::boxed::Box::new(model));
+    let mut alloc_cb = |bytes: usize, align: usize| -> *mut u8 {
+        arena
+            .alloc_bytes(bytes, align)
+            .map(|s| s.as_mut_ptr())
+            .unwrap_or(core::ptr::null_mut())
+    };
+    ui.show(4, 750, &alloc::format!("KV cache + scratch ({} MB, ctx {})", need / (1024 * 1024), CTX_LEN));
+    let infer = match InferCtx::new(model, CTX_LEN, &mut alloc_cb) {
+        Ok(i) => i,
+        Err(e) => ui.fail(&alloc::format!("inference init failed: {e:?}")),
+    };
+    let sampler = Sampler::new(0.7, 0.9, nr_runtime::clock::rdtsc());
+    ui.show(4, 1000, "inference engine ready");
 
     // Stage 5: done.
     let boot_ms = clock.ticks_to_ms(clock.now() - t_boot);
@@ -188,7 +208,7 @@ fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx
     stall_us(400_000);
 
     let model_name = alloc::format!("{} Q8_0", model.meta.name_str());
-    Platform { display, fonts, clock, arena, ram_mb, model, tokenizer, model_name }
+    Platform { display, fonts, clock, arena, ram_mb, model, tokenizer, model_name, infer, sampler }
 }
 
 fn nr_tensor_fast() -> bool {
@@ -215,14 +235,14 @@ fn chat_loop(p: &mut Platform, surf: &mut nr_gfx::Surface) {
     turns.push(Turn {
         role: Role::System,
         text: alloc::format!(
-            "{} loaded and verified in RAM. Tokenizer online ({} tokens). Generation lands in M5 - replies below show real tokenizer output.",
+            "{} resident in RAM - fully local inference, no OS underneath. Type a prompt; ESC stops a running generation.",
             p.model_name,
-            p.tokenizer.vocab_len(),
         ),
     });
     let mut inputline = String::new();
     let mut frame = 0u32;
     let mut last_rate = 0u32;
+    let mut conversation_started = false;
 
     loop {
         let mut dirty = false;
@@ -238,7 +258,7 @@ fn chat_loop(p: &mut Platform, surf: &mut nr_gfx::Surface) {
                         let prompt = core::mem::take(&mut inputline);
                         serial_println!("[chat] user: {}", prompt);
                         turns.push(Turn { role: Role::User, text: prompt.clone() });
-                        last_rate = tokenize_demo(p, &prompt, &mut turns);
+                        last_rate = generate(p, surf, &prompt, &mut turns, &mut conversation_started, frame);
                     } else {
                         inputline.clear();
                     }
@@ -252,6 +272,124 @@ fn chat_loop(p: &mut Platform, surf: &mut nr_gfx::Surface) {
         }
         frame = frame.wrapping_add(1);
         stall_us(16_000);
+    }
+}
+
+/// Run one user turn through the model, streaming tokens to the screen.
+/// Returns milli-tokens/sec over the generation phase.
+fn generate(
+    p: &mut Platform,
+    surf: &mut nr_gfx::Surface,
+    prompt: &str,
+    turns: &mut Vec<Turn>,
+    conversation_started: &mut bool,
+    mut frame: u32,
+) -> u32 {
+    // Out of context? Start a fresh conversation.
+    if p.infer.remaining() < MAX_GEN_TOKENS + 256 {
+        p.infer.reset();
+        *conversation_started = false;
+        turns.push(Turn {
+            role: Role::System,
+            text: String::from("context window full - conversation reset"),
+        });
+    }
+
+    // Build this turn's token sequence (Llama-3 instruct template).
+    let mut ids: Vec<u32> = Vec::new();
+    if !*conversation_started {
+        p.tokenizer.encode_conversation_start(Some(SYSTEM_PROMPT), &mut ids);
+        *conversation_started = true;
+    }
+    p.tokenizer.encode_message(nr_token::template::ROLE_USER, prompt, &mut ids);
+    p.tokenizer.encode_header(nr_token::template::ROLE_ASSISTANT, &mut ids);
+
+    turns.push(Turn { role: Role::Llama, text: String::new() });
+
+    // Prefill. Redraw between tokens so the UI shows life.
+    let t0 = p.clock.now();
+    let mut logits_ready = false;
+    for (i, &id) in ids.iter().enumerate() {
+        p.infer.forward(id);
+        logits_ready = true;
+        if i % 4 == 0 {
+            draw_chat(p, surf, turns, "", frame, 0, true);
+            frame = frame.wrapping_add(1);
+        }
+        if p.infer.remaining() == 0 {
+            break;
+        }
+    }
+    let prefill_ms = p.clock.ticks_to_ms(p.clock.now() - t0);
+    serial_println!(
+        "[gen] prefill {} tokens in {} ms ({} tok/s)",
+        ids.len(),
+        prefill_ms,
+        ids.len() as u64 * 1000 / prefill_ms.max(1)
+    );
+    let _ = logits_ready;
+
+    // Generation loop.
+    let t0 = p.clock.now();
+    let mut produced = 0u64;
+    let mut rate = 0u32;
+    let mut utf8_pending: Vec<u8> = Vec::new();
+    // The logits of the last prefilled token seed the first sample; re-run
+    // sample/forward until a stop token, budget, or ESC.
+    let mut next = {
+        let logits = p.infer.logits();
+        p.sampler.sample(logits)
+    };
+    while !p.tokenizer.is_stop(next) && produced < MAX_GEN_TOKENS as u64 && p.infer.remaining() > 0 {
+        utf8_pending.extend_from_slice(p.tokenizer.token_bytes(next));
+        flush_utf8(&mut utf8_pending, &mut turns.last_mut().unwrap().text);
+
+        produced += 1;
+        rate = p.clock.rate_milli(produced, p.clock.now() - t0);
+        draw_chat(p, surf, turns, "", frame, rate, true);
+        frame = frame.wrapping_add(1);
+
+        if matches!(input::poll(), Some(InputEvent::Escape)) {
+            serial_println!("[gen] interrupted by user");
+            break;
+        }
+
+        let logits = p.infer.forward(next);
+        next = p.sampler.sample(logits);
+    }
+    // Keep the template consistent for the next turn.
+    if p.tokenizer.is_stop(next) && p.infer.remaining() > 0 {
+        p.infer.forward(p.tokenizer.specials.eot);
+    }
+
+    let gen_ms = p.clock.ticks_to_ms(p.clock.now() - t0);
+    serial_println!(
+        "[gen] {} tokens in {} ms ({} milli-tok/s)",
+        produced,
+        gen_ms,
+        rate
+    );
+    if turns.last().map(|t| t.text.is_empty()).unwrap_or(false) {
+        turns.last_mut().unwrap().text = String::from("(no output)");
+    }
+    rate
+}
+
+/// Move complete UTF-8 prefixes of `pending` into `out` (token boundaries
+/// can split multi-byte characters).
+fn flush_utf8(pending: &mut Vec<u8>, out: &mut String) {
+    match core::str::from_utf8(pending) {
+        Ok(s) => {
+            out.push_str(s);
+            pending.clear();
+        }
+        Err(e) => {
+            let ok = e.valid_up_to();
+            if ok > 0 {
+                out.push_str(core::str::from_utf8(&pending[..ok]).unwrap());
+                pending.drain(..ok);
+            }
+        }
     }
 }
 
@@ -276,33 +414,3 @@ fn draw_chat(
     p.display.present(surf);
 }
 
-/// M4 placeholder reply: run the real tokenizer over the prompt and report
-/// what the inference engine will see. Returns milli-tokens/sec (encode).
-fn tokenize_demo(p: &mut Platform, prompt: &str, turns: &mut Vec<Turn>) -> u32 {
-    let t0 = p.clock.now();
-    let mut ids: Vec<u32> = Vec::new();
-    p.tokenizer.encode_text(prompt, &mut ids);
-    let dt = p.clock.now() - t0;
-    let rate = p.clock.rate_milli(ids.len() as u64, dt);
-
-    let mut text = alloc::format!("[tokenizer] {} tokens: ", ids.len());
-    for (i, id) in ids.iter().take(24).enumerate() {
-        if i > 0 {
-            text.push(' ');
-        }
-        text.push_str(&alloc::format!("{id}"));
-    }
-    if ids.len() > 24 {
-        text.push_str(" ...");
-    }
-    text.push_str(" | decoded: ");
-    for &id in ids.iter().take(24) {
-        if let Ok(s) = core::str::from_utf8(p.tokenizer.token_bytes(id)) {
-            text.push_str(&alloc::format!("[{s}]"));
-        }
-    }
-    text.push_str(" | the inference engine plugs in here in M5.");
-    turns.push(Turn { role: Role::Llama, text });
-    serial_println!("[chat] tokenized {} tokens", ids.len());
-    rate
-}

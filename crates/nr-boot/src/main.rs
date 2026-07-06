@@ -24,12 +24,49 @@ fn main() -> Status {
     serial::init();
     serial_println!("[nightrun] v{} boot layer up", VERSION);
     uefi::helpers::init().expect("uefi helpers");
+    // The firmware watchdog would reset the machine mid-chat; disable it.
+    let _ = uefi::boot::set_watchdog_timer(0, 0x1_0000, None);
+    enable_avx();
 
     let display = video::init();
     install_panic_fb(&display);
 
     app::run(display);
     Status::SUCCESS
+}
+
+/// Enable AVX (YMM state) via XCR0 so the AVX2/FMA/F16C kernels can run.
+/// UEFI guarantees SSE only; we do the OSXSAVE dance ourselves.
+fn enable_avx() {
+    use core::arch::x86_64::__cpuid;
+    // SAFETY: cpuid is always available on x86_64.
+    let leaf1 = unsafe { __cpuid(1) };
+    let xsave = leaf1.ecx & (1 << 26) != 0;
+    let avx = leaf1.ecx & (1 << 28) != 0;
+    if !(xsave && avx) {
+        serial_println!("[cpu] no AVX - scalar kernels");
+        return;
+    }
+    // SAFETY: CPL0 under UEFI; setting CR4.OSXSAVE then XCR0 x87|SSE|AVX.
+    unsafe {
+        core::arch::asm!(
+            "mov rax, cr4",
+            "or rax, 1 << 18", // CR4.OSXSAVE
+            "mov cr4, rax",
+            out("rax") _,
+            options(nostack)
+        );
+        core::arch::asm!(
+            "xor ecx, ecx",
+            "xgetbv",
+            "or eax, 7", // x87 | SSE | AVX state
+            "xsetbv",
+            out("eax") _, out("ecx") _, out("edx") _,
+            options(nostack)
+        );
+    }
+    let f = nr_tensor::cpu::features();
+    serial_println!("[cpu] avx enabled; avx2={} fma={} f16c={}", f.avx2, f.fma, f.f16c);
 }
 
 // ---- Panic screen ----------------------------------------------------------
