@@ -14,3 +14,22 @@ Date: 2026-07-06
 ```
 
 See docs/architecture.md for the performance discussion.
+
+## Head-to-head vs llama.cpp (host, same machine)
+
+Same Q8_0 weights, same prompt, greedy, 64 tokens, 8 threads, ctx 4096
+(llama.cpp b1-cb295bf, `-t 8 -c 4096`; NightRun engine via nrhost):
+
+| | generation | prompt processing |
+|---|---|---|
+| llama.cpp | 19.6 tok/s | 60–65 tok/s |
+| NightRun  | 20.3 tok/s | 21.9 tok/s |
+| NightRun, 1 thread | 7.2 tok/s | 7.1 tok/s |
+
+Generation is at parity (both are memory-bandwidth-bound reading ~1.1 GB
+of weights per token). Prompt processing is ~3x slower in NightRun because
+prefill runs the single-token path instead of a batched GEMM — the
+documented next optimization. Note: benchmark llama.cpp with `-c 4096`;
+its default (the model's full 131k training context) allocates a ~4.3 GB
+KV cache, which swaps on an 8 GB-class machine and produces nonsense
+numbers.
