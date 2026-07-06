@@ -17,6 +17,7 @@ fn main() {
     let mut temp = 0.7f32;
     let mut top_p = 0.9f32;
     let mut raw = false;
+    let mut debug_gap = false;
     let mut ctx = 4096usize;
     let mut seed = 0x5eed_cafe_u64;
     let mut threads = 1usize;
@@ -30,6 +31,7 @@ fn main() {
             "--ctx" => ctx = args.next().unwrap().parse().unwrap(),
             "--seed" => seed = args.next().unwrap().parse().unwrap(),
             "--raw" => raw = true,
+            "--debug-gap" => debug_gap = true,
             other => panic!("unknown arg {other}"),
         }
     }
@@ -99,8 +101,28 @@ fn main() {
     let t0 = std::time::Instant::now();
     let mut generated = Vec::new();
     let mut out_bytes: Vec<u8> = Vec::new();
-    for _ in 0..n_tokens {
+    for step in 0..n_tokens {
         let next = sampler.sample(logits);
+        if debug_gap {
+            // Top-2 logit gap: near-ties explain greedy divergence between
+            // numerically equivalent implementations.
+            let mut top1 = (f32::NEG_INFINITY, 0usize);
+            let mut top2 = f32::NEG_INFINITY;
+            for (i, &v) in logits.iter().enumerate() {
+                if v > top1.0 {
+                    top2 = top1.0;
+                    top1 = (v, i);
+                } else if v > top2 {
+                    top2 = v;
+                }
+            }
+            eprintln!(
+                "step {step}: top1={} ({:.4}) gap={:.5}",
+                top1.1,
+                top1.0,
+                top1.0 - top2
+            );
+        }
         if tok.is_stop(next) {
             break;
         }

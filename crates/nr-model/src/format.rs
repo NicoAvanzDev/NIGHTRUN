@@ -12,8 +12,8 @@
 use alloc::vec::Vec;
 
 pub const MAGIC: [u8; 4] = *b"NRUN";
-pub const VERSION: u32 = 2;
-pub const HEADER_SIZE: usize = 176;
+pub const VERSION: u32 = 3;
+pub const HEADER_SIZE: usize = 192;
 pub const NAME_LEN: usize = 48;
 pub const ENTRY_SIZE: usize = 32;
 pub const DATA_ALIGN: usize = 64;
@@ -25,6 +25,7 @@ pub const FLAG_TIED_EMBEDDINGS: u32 = 1;
 pub enum Arch {
     Llama3 = 1,
     Qwen3 = 2,
+    Granite = 3,
 }
 
 impl Arch {
@@ -32,6 +33,7 @@ impl Arch {
         match v {
             1 => Some(Arch::Llama3),
             2 => Some(Arch::Qwen3),
+            3 => Some(Arch::Granite),
             _ => None,
         }
     }
@@ -41,6 +43,7 @@ impl Arch {
         match self {
             Arch::Llama3 => "llama",
             Arch::Qwen3 => "qwen",
+            Arch::Granite => "granite",
         }
     }
 }
@@ -129,6 +132,15 @@ pub struct Meta {
     pub rope_high: f32,
     pub rope_orig_ctx: f32,
     pub flags: u32,
+    /// muP-style scalars (Granite); neutral values elsewhere.
+    /// embed_scale: multiplies the token embedding (neutral 1.0).
+    pub embed_scale: f32,
+    /// Attention score scale; 0.0 means "use 1/sqrt(head_dim)".
+    pub attn_scale: f32,
+    /// Residual branch multiplier (neutral 1.0).
+    pub residual_scale: f32,
+    /// Logits are divided by this (neutral 1.0).
+    pub logit_scale: f32,
     /// Display name, NUL-padded UTF-8.
     pub name: [u8; NAME_LEN],
 }
@@ -258,6 +270,10 @@ impl<'a> Model<'a> {
             rope_high: c.f32(),
             rope_orig_ctx: c.f32(),
             flags: c.u32(),
+            embed_scale: c.f32(),
+            attn_scale: c.f32(),
+            residual_scale: c.f32(),
+            logit_scale: c.f32(),
             name: {
                 let mut n = [0u8; NAME_LEN];
                 n.copy_from_slice(&blob[c.1..c.1 + NAME_LEN]);
@@ -275,6 +291,17 @@ impl<'a> Model<'a> {
         let data_crc = c.u32();
         let meta_crc = c.u32();
         debug_assert_eq!(c.1, HEADER_SIZE);
+        // Scalar coherence: reject NaN/inf/nonsensical values outright.
+        if !meta.embed_scale.is_finite()
+            || !meta.attn_scale.is_finite()
+            || meta.attn_scale < 0.0
+            || !meta.residual_scale.is_finite()
+            || meta.residual_scale <= 0.0
+            || !meta.logit_scale.is_finite()
+            || meta.logit_scale <= 0.0
+        {
+            return Err(ParseError::BadTable);
+        }
 
         let table_end = table_off + tensor_count * ENTRY_SIZE;
         if blob.len() < table_end || blob.len() < data_off + data_size || blob.len() < tok_off + tok_size

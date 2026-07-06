@@ -54,12 +54,48 @@ fn ggml_dtype_name(t: u32) -> String {
     }
 }
 
+/// Architecture-kind verdict: NightRun supports conventional dense
+/// decoder-only transformers only.
+fn arch_verdict(g: &Gguf, arch: &str) -> Result<(), String> {
+    match arch {
+        "llama" | "qwen3" | "granite" => {}
+        "granitehybrid" | "granitemoehybrid" => {
+            return Err(format!(
+                "Unsupported Granite artifact:\n  detected architecture: {arch} (hybrid transformer + state-space)\n  NightRun Granite support targets the conventional dense transformer variant only.\n  Use a dense Granite GGUF (general.architecture == \"granite\"), e.g. ibm-granite/granite-4.1-3b-GGUF."
+            ));
+        }
+        other => return Err(format!("unsupported architecture {other:?} (supported: llama, qwen3, granite)")),
+    }
+    // Belt and braces: reject SSM/MoE features even under a supported name.
+    for key in ["ssm_conv_kernel", "ssm_state_size", "expert_count", "expert_used_count"] {
+        let k = format!("{arch}.{key}");
+        if let Some(v) = g.kv.get(&k) {
+            if v.as_u32().unwrap_or(0) != 0 {
+                return Err(format!(
+                    "unsupported architecture feature: {k} = {v:?} (SSM/MoE models are out of scope; use a conventional dense transformer artifact)"
+                ));
+            }
+        }
+    }
+    if let Some(t) = g.tensors.iter().find(|t| t.name.contains(".ssm_") || t.name.contains("ffn_gate_exps")) {
+        return Err(format!(
+            "unsupported tensor {:?}: SSM/MoE layers detected (dense transformers only)",
+            t.name
+        ));
+    }
+    Ok(())
+}
+
 /// Dump the per-tensor dtype table of a GGUF without converting.
 fn inspect(input: &str) {
     let g = gguf::parse(input);
     let arch = g.kv.get("general.architecture").and_then(gguf::Value::as_str).unwrap_or("?");
     let name = g.kv.get("general.name").and_then(gguf::Value::as_str).unwrap_or("?");
     println!("arch={arch} name={name:?} tensors={}", g.tensors.len());
+    match arch_verdict(&g, arch) {
+        Ok(()) => println!("verdict: conventional dense transformer (supported)"),
+        Err(e) => println!("verdict: REJECTED - {e}"),
+    }
     for key in [
         "embedding_length",
         "block_count",
@@ -68,12 +104,23 @@ fn inspect(input: &str) {
         "attention.key_length",
         "feed_forward_length",
         "rope.freq_base",
+        "rope.scaling.type",
         "attention.layer_norm_rms_epsilon",
         "context_length",
+        // Granite muP scalars.
+        "embedding_scale",
+        "attention.scale",
+        "residual_scale",
+        "logit_scale",
     ] {
         let k = format!("{arch}.{key}");
         if let Some(v) = g.kv.get(&k) {
             println!("  {k} = {v:?}");
+        }
+    }
+    for key in ["general.file_type", "tokenizer.ggml.pre", "tokenizer.ggml.bos_token_id", "tokenizer.ggml.eos_token_id", "tokenizer.ggml.add_bos_token"] {
+        if let Some(v) = g.kv.get(key) {
+            println!("  {key} = {v:?}");
         }
     }
     // Aggregate dtype mix per tensor role (strip blk.N. prefixes).
@@ -107,10 +154,15 @@ fn main() {
     println!("parsing {input} ...");
     let g = gguf::parse(input);
     let arch = g.kv["general.architecture"].as_str().unwrap();
+    if let Err(e) = arch_verdict(&g, arch) {
+        eprintln!("{e}");
+        std::process::exit(1);
+    }
     let (arch_id, family) = match arch {
         "llama" => (1u32, tokenizer::Family::Llama3),
         "qwen3" => (2u32, tokenizer::Family::Qwen3),
-        other => panic!("unsupported architecture {other} (expected llama or qwen3)"),
+        "granite" => (3u32, tokenizer::Family::Granite),
+        other => panic!("unsupported architecture {other}"),
     };
 
     let akey = |suffix: &str| format!("{arch}.{suffix}");
@@ -199,6 +251,26 @@ fn main() {
     // precomputed rope_freqs tensor instead, which we prefer at runtime).
     let rope_factor = g.kv.get("llama.rope.scaling.factor").and_then(gguf::Value::as_f32).unwrap_or(0.0);
 
+    // Granite muP scalars: required semantics for granite (no invented
+    // defaults); neutral values for other families. attn_scale 0.0 means
+    // "use 1/sqrt(head_dim)" at runtime.
+    let (embed_scale, attn_scale, residual_scale, logit_scale) = if arch_id == 3 {
+        let req = |key: &str| -> f32 {
+            g.kv
+                .get(&akey(key))
+                .and_then(gguf::Value::as_f32)
+                .unwrap_or_else(|| panic!("granite artifact missing required scalar {}", akey(key)))
+        };
+        let scalars = (req("embedding_scale"), req("attention.scale"), req("residual_scale"), req("logit_scale"));
+        println!(
+            "granite scalars: embed x{} attn x{} residual x{} logits /{}",
+            scalars.0, scalars.1, scalars.2, scalars.3
+        );
+        scalars
+    } else {
+        (1.0, 0.0, 1.0, 1.0)
+    };
+
     // Assign 64-byte-aligned data offsets.
     let mut cursor = 0u64;
     for t in out.iter_mut() {
@@ -261,6 +333,9 @@ fn main() {
         header.extend_from_slice(&v.to_bits().to_le_bytes());
     }
     header.extend_from_slice(&flags.to_le_bytes());
+    for v in [embed_scale, attn_scale, residual_scale, logit_scale] {
+        header.extend_from_slice(&v.to_bits().to_le_bytes());
+    }
     let base_name = g
         .kv
         .get("general.name")

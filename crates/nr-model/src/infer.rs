@@ -165,6 +165,11 @@ pub struct InferCtx<'m> {
     pub weights: Weights<'m>,
     norm_eps: f32,
     rope_style: rope::RopeStyle,
+    // muP scalars (neutral 1.0 / precomputed for non-Granite models).
+    embed_scale: f32,
+    att_score_scale: f32,
+    residual_scale: f32,
+    logit_recip: f32,
     freqs: &'static mut [f32],
     // Scratch (all preallocated; generation never allocates).
     x: &'static mut [f32],
@@ -250,6 +255,10 @@ impl<'m> InferCtx<'m> {
 
         let embed = mat(TensorKind::TokEmbed, 0, dims.vocab, dims.dim)?;
         let is_qwen = m.arch == Arch::Qwen3;
+        // Non-Qwen families must not carry qk-norm tensors.
+        if !is_qwen && model.has_tensor(TensorKind::AttnQNorm) {
+            return Err(ParseError::MissingTensor("unexpected attn_q_norm for this arch"));
+        }
         let mut layers = alloc::vec::Vec::with_capacity(dims.n_layers);
         for l in 0..dims.n_layers {
             layers.push(LayerWeights {
@@ -306,9 +315,17 @@ impl<'m> InferCtx<'m> {
         Ok(InferCtx {
             norm_eps: m.norm_eps,
             rope_style: match m.arch {
-                Arch::Llama3 => rope::RopeStyle::Adjacent,
+                Arch::Llama3 | Arch::Granite => rope::RopeStyle::Adjacent,
                 Arch::Qwen3 => rope::RopeStyle::Neox,
             },
+            embed_scale: m.embed_scale,
+            att_score_scale: if m.attn_scale != 0.0 {
+                m.attn_scale
+            } else {
+                1.0 / libm::sqrtf(m.head_dim as f32)
+            },
+            residual_scale: m.residual_scale,
+            logit_recip: 1.0 / m.logit_scale,
             freqs,
             x: take(alloc, dims.dim),
             xb: take(alloc, dims.dim),
@@ -351,8 +368,11 @@ impl<'m> InferCtx<'m> {
         let pos = self.pos;
         assert!(pos < d.ctx, "context window exhausted");
 
-        // Token embedding (dequantized row).
+        // Token embedding (dequantized row), muP embedding scale applied.
         self.weights.embed.dequant_row(token as usize, d.dim, self.x);
+        if self.embed_scale != 1.0 {
+            tvec::scale_inplace(self.x, self.embed_scale);
+        }
 
         for l in 0..d.n_layers {
             let w = &self.weights.layers[l];
@@ -387,7 +407,7 @@ impl<'m> InferCtx<'m> {
             // Multi-head attention against the cache (GQA: kv head shared
             // by n_heads / n_kv_heads query heads).
             let gqa = d.n_heads / d.n_kv_heads;
-            let scale = 1.0 / libm::sqrtf(d.head_dim as f32);
+            let scale = self.att_score_scale;
             for h in 0..d.n_heads {
                 let qh = &self.q[h * d.head_dim..(h + 1) * d.head_dim];
                 let kvh = (h / gqa) * d.head_dim;
@@ -406,19 +426,22 @@ impl<'m> InferCtx<'m> {
             }
 
             self.acts.matvec(self.xb2, w.wo, self.attn_out);
-            tvec::add_assign(self.x, self.xb2);
+            tvec::saxpy(self.x, self.residual_scale, self.xb2);
 
             // MLP block (SwiGLU).
             tvec::rmsnorm(self.xb, self.x, w.ffn_norm, self.norm_eps);
             self.acts.matvec_group(&mut [(self.gate, w.w_gate), (self.up, w.w_up)], self.xb);
             tvec::swiglu(self.gate, self.up);
             self.acts.matvec(self.xb2, w.w_down, self.gate);
-            tvec::add_assign(self.x, self.xb2);
+            tvec::saxpy(self.x, self.residual_scale, self.xb2);
         }
 
         // Final norm + classifier.
         tvec::rmsnorm(self.xb, self.x, self.weights.out_norm, self.norm_eps);
         self.acts.matvec(self.logits, self.weights.output, self.xb);
+        if self.logit_recip != 1.0 {
+            tvec::scale_inplace(self.logits, self.logit_recip);
+        }
 
         self.pos += 1;
         self.logits

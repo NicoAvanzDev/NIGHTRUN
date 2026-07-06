@@ -146,3 +146,96 @@ fn qwen_output_head_is_tied_embedding() {
     assert_eq!(embed.rows, 151936);
     assert_eq!(embed.cols, 2560);
 }
+
+// ---- Granite 4.1 3B Q4_K_M pins (verified against llama-completion
+// --temp 0 -c 4096 on the identical GGUF). Granite's /10 logit scaling
+// compresses greedy gaps, so some prompts flip on near-ties (top-2 gap
+// < ~0.4) between numerically-equivalent implementations; the pins below
+// matched llama.cpp token-for-token. See docs/architecture.md.
+
+#[test]
+fn granite_greedy_matches_llama_cpp_capital() {
+    let _guard = serial();
+    let Some(text) = greedy_in("granite-4.1-3b-q4km.nrm", "The capital of France is", 12, false)
+    else {
+        eprintln!("SKIP: models/granite-4.1-3b-q4km.nrm not present");
+        return;
+    };
+    assert_eq!(text, " Paris. It is located in the northern part of the country");
+}
+
+#[test]
+fn granite_greedy_matches_llama_cpp_colors() {
+    let _guard = serial();
+    let Some(text) = greedy_in("granite-4.1-3b-q4km.nrm", "The three primary colors are", 16, false)
+    else {
+        eprintln!("SKIP: models/granite-4.1-3b-q4km.nrm not present");
+        return;
+    };
+    assert_eq!(
+        text,
+        " red, blue, and yellow. These colors are fundamental because they can be combined"
+    );
+}
+
+#[test]
+fn granite_chat_greedy_matches_llama_cpp() {
+    let _guard = serial();
+    let Some(text) =
+        greedy_in("granite-4.1-3b-q4km.nrm", "What is the capital of France?", 20, true)
+    else {
+        eprintln!("SKIP: models/granite-4.1-3b-q4km.nrm not present");
+        return;
+    };
+    assert_eq!(text, "The capital of France is Paris.");
+}
+
+/// Tied-head + scalar audit: the artifact has no output tensor, the Q6_K
+/// embedding doubles as classifier, and the four muP scalars round-trip
+/// through the .nrm header exactly.
+#[test]
+fn granite_metadata_audit() {
+    let _guard = serial();
+    let Some(blob) = load_model_blob("granite-4.1-3b-q4km.nrm") else {
+        eprintln!("SKIP: models/granite-4.1-3b-q4km.nrm not present");
+        return;
+    };
+    let model = nr_model::Model::parse(&blob).expect("parse model");
+    let m = &model.meta;
+    assert_eq!(m.arch, nr_model::format::Arch::Granite);
+    assert!(m.flags & nr_model::format::FLAG_TIED_EMBEDDINGS != 0);
+    assert!(!model.has_tensor(nr_model::TensorKind::Output));
+    assert!(!model.has_tensor(nr_model::TensorKind::AttnQNorm));
+    assert_eq!(m.embed_scale, 12.0);
+    assert_eq!(m.attn_scale, 0.015625);
+    assert_eq!(m.residual_scale, 0.22);
+    assert_eq!(m.logit_scale, 10.0);
+    assert_eq!(m.head_dim, 64);
+    let embed = model.tensor(nr_model::TensorKind::TokEmbed, 0).unwrap();
+    assert_eq!(embed.dtype, nr_model::TensorDtype::Q6K);
+    assert_eq!((embed.rows, embed.cols), (100352, 2560));
+}
+
+/// Neutral scalars must be exact no-ops (llama/qwen numerics unchanged).
+#[test]
+fn neutral_scalars_are_noops() {
+    let _guard = serial();
+    for file in ["model.nrm", "qwen3-4b-q4km.nrm"] {
+        let Some(blob) = load_model_blob(file) else {
+            eprintln!("SKIP: models/{file} not present");
+            continue;
+        };
+        let m = nr_model::Model::parse(&blob).expect("parse").meta;
+        assert_eq!(m.embed_scale, 1.0, "{file}");
+        assert_eq!(m.attn_scale, 0.0, "{file}"); // 0 => 1/sqrt(head_dim)
+        assert_eq!(m.residual_scale, 1.0, "{file}");
+        assert_eq!(m.logit_scale, 1.0, "{file}");
+        // saxpy with 1.0 and scale_inplace skipping are IEEE-exact no-ops.
+        let mut y = [1.5f32, -2.25, 3.75];
+        let x = [0.5f32, 0.25, -1.0];
+        let mut y2 = y;
+        nr_tensor::vec::saxpy(&mut y, 1.0, &x);
+        nr_tensor::vec::add_assign(&mut y2, &x);
+        assert_eq!(y, y2);
+    }
+}

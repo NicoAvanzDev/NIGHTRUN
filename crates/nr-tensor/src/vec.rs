@@ -57,6 +57,13 @@ pub fn dot(a: &[f32], b: &[f32]) -> f32 {
     s
 }
 
+/// x *= s
+pub fn scale_inplace(x: &mut [f32], s: f32) {
+    for v in x.iter_mut() {
+        *v *= s;
+    }
+}
+
 /// y += a * x
 pub fn saxpy(y: &mut [f32], a: f32, x: &[f32]) {
     for (yv, &xv) in y.iter_mut().zip(x) {

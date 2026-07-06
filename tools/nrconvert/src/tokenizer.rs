@@ -40,6 +40,7 @@ pub struct BuiltTokenizer {
 pub enum Family {
     Llama3,
     Qwen3,
+    Granite,
 }
 
 pub fn build(gguf: &Gguf, family: Family) -> BuiltTokenizer {
@@ -72,6 +73,7 @@ pub fn build(gguf: &Gguf, family: Family) -> BuiltTokenizer {
         let expect = match family {
             Family::Llama3 => "llama-bpe",
             Family::Qwen3 => "qwen2",
+            Family::Granite => "dbrx", // cl100k-pattern pretokenizer
         };
         assert_eq!(pre, expect, "pretokenizer mismatch: gguf says {pre:?}, family expects {expect:?}");
     }
@@ -164,6 +166,14 @@ pub fn build(gguf: &Gguf, family: Family) -> BuiltTokenizer {
             lookup_literal("<|im_start|>"),
             lookup_literal("<|im_end|>"),
             lookup_literal("<|endoftext|>"),
+        ),
+        // Granite: <|end_of_text|> triples as bos/eos/eot.
+        Family::Granite => (
+            3u32,
+            lookup_literal("<|end_of_text|>"),
+            lookup_literal("<|start_of_role|>"),
+            lookup_literal("<|end_of_role|>"),
+            lookup_literal("<|end_of_text|>"),
         ),
     };
 

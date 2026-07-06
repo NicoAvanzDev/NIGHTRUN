@@ -11,6 +11,11 @@
 //!   <|im_start|>user\n{user}<|im_end|>\n
 //!   <|im_start|>assistant\n
 //!
+//! Granite (no BOS):
+//!   <|start_of_role|>system<|end_of_role|>{system}<|end_of_text|>\n
+//!   <|start_of_role|>user<|end_of_role|>{user}<|end_of_text|>\n
+//!   <|start_of_role|>assistant<|end_of_role|>
+//!
 //! In the blob's generic special slots, chatml maps <|im_start|> to
 //! `start_header` and <|im_end|> to `eot`/`eos`.
 
@@ -38,6 +43,11 @@ impl<'a> Tokenizer<'a> {
                 self.encode_text(role, out);
                 self.encode_text("\n", out);
             }
+            Template::Granite => {
+                out.push(self.specials.start_header); // <|start_of_role|>
+                self.encode_text(role, out);
+                out.push(self.specials.end_header); // <|end_of_role|>
+            }
         }
     }
 
@@ -46,7 +56,7 @@ impl<'a> Tokenizer<'a> {
         self.encode_header(role, out);
         self.encode_text(content, out);
         out.push(self.specials.eot);
-        if self.template == Template::ChatMl {
+        if matches!(self.template, Template::ChatMl | Template::Granite) {
             self.encode_text("\n", out);
         }
     }

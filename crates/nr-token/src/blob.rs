@@ -24,6 +24,8 @@ pub enum Template {
     Llama3,
     /// ChatML (Qwen): <|im_start|>role\n ... <|im_end|>\n  (no BOS)
     ChatMl,
+    /// Granite: <|start_of_role|>role<|end_of_role|>content<|end_of_text|>\n (no BOS)
+    Granite,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -72,6 +74,7 @@ impl<'a> Tokenizer<'a> {
         let template = match u32le(blob, 8) {
             1 => Template::Llama3,
             2 => Template::ChatMl,
+            3 => Template::Granite,
             _ => return Err(Error::BadVersion),
         };
         let vocab_count = u32le(blob, 12);
@@ -187,7 +190,9 @@ impl<'a> Tokenizer<'a> {
     /// Encode plain text (no special tokens are ever produced).
     pub fn encode_text(&self, text: &str, out: &mut Vec<u32>) {
         let style = match self.template {
-            Template::Llama3 => crate::pretok::Style::Llama3,
+            // Granite's "dbrx" pretokenizer is the cl100k pattern — the
+            // same regex as Llama 3 (fixture-verified).
+            Template::Llama3 | Template::Granite => crate::pretok::Style::Llama3,
             Template::ChatMl => crate::pretok::Style::Qwen2,
         };
         for chunk in crate::pretok::chunks(text, style) {
