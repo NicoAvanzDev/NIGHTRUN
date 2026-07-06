@@ -1,8 +1,14 @@
 # NightRun architecture
 
-NightRun supports two model families as first-class citizens:
-**Llama 3.2 1B Instruct (Q8_0)** and **Qwen3-4B-Instruct-2507 (Q4_K_M)**.
-One model ships per image (`cargo xtask image --model <file.nrm>`).
+NightRun supports three model families as first-class citizens:
+**Llama 3.2 1B Instruct (Q8_0)**, **Qwen3-4B-Instruct-2507 (Q4_K_M)** and
+**Granite 4.1 3B (Q4_K_M, dense transformer)**. One model ships per image
+(`cargo xtask image --model <file.nrm>`).
+
+Scope note: NightRun supports the conventional dense transformer variant
+of Granite only. Hybrid Granite architectures (Mamba-2/SSM layers, MoE)
+are intentionally out of scope and are rejected at conversion with an
+actionable error.
 
 ## The load-bearing decision: UEFI Boot Services stay on
 
@@ -74,6 +80,16 @@ Tensors stay in their GGUF block layouts: Q8_0 (32 x i8 + f16 scale =
 144 B) and Q6_K (4+2-bit planes, 16 signed scales, 210 B); norms in f32.
 The header carries an `arch` field (llama3 / qwen3) and the parser
 validates every tensor's byte size against its dtype's block math.
+
+Granite adds four muP scalars to the header (embedding x12, attention
+score 1/64 replacing 1/sqrt(head_dim), residual x0.22, logits /10 for
+granite-4.1-3b), stored explicitly with neutral values for other
+families and applied branch-free in the forward pass. Granite's audited
+Q4_K_M policy mirrors Qwen's: Q4_K majority, Q6_K for attn_v + ffn_down
+in 20/40 layers and the (tied) token_embd; pretokenizer id "dbrx" == the
+cl100k pattern our Llama-3 style already implements; template
+`<|start_of_role|>role<|end_of_role|>content<|end_of_text|>\n` with
+`<|end_of_text|>` (100257) tripling as bos/eos/eot.
 
 The audited dtype policy of the Qwen3-4B Q4_K_M artifact: everything
 Q4_K except `attn_v` (18/36 layers), `ffn_down` (18/36 layers) and

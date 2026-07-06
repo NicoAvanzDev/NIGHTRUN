@@ -49,6 +49,8 @@ pub struct Stats<'a> {
     pub tok_s_milli: u32,
     /// Prompt-processing rate, milli-tokens per second; 0 hides it.
     pub pp_milli: u32,
+    /// First-token latency of the last turn, ms; 0 hides it.
+    pub ftl_ms: u32,
     pub ctx_used: u32,
     pub ctx_max: u32,
     pub cores: u32,
@@ -122,6 +124,13 @@ fn status_bar(surf: &mut Surface, fonts: &Fonts, stats: &Stats) {
         right.push_str("pp ");
         fmt_milli(&mut right, stats.pp_milli);
         right.push_str("  ");
+    }
+    if stats.ftl_ms > 0 {
+        right.push_str("ftl ");
+        fmt_u32(&mut right, stats.ftl_ms / 1000);
+        right.push('.');
+        fmt_u32(&mut right, (stats.ftl_ms % 1000) / 100);
+        right.push_str("s  ");
     }
     if stats.tok_s_milli > 0 {
         fmt_milli(&mut right, stats.tok_s_milli);

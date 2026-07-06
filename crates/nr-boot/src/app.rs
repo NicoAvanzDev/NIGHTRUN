@@ -43,6 +43,7 @@ pub struct Platform {
     pub sampler: Sampler,
     pub cores: u32,
     pub pp_milli: u32,
+    pub ftl_ms: u32,
     pub assistant: &'static str,
 }
 
@@ -237,6 +238,7 @@ fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx
         sampler,
         cores: workers as u32 + 1,
         pp_milli: 0,
+        ftl_ms: 0,
         assistant: model.meta.arch.assistant_label(),
     }
 }
@@ -359,6 +361,7 @@ fn generate(
     }
     let prefill_ms = p.clock.ticks_to_ms(p.clock.now() - t0);
     p.pp_milli = (ids.len() as u64 * 1_000_000 / prefill_ms.max(1)) as u32;
+    p.ftl_ms = prefill_ms as u32; // time until the first token can appear
     serial_println!(
         "[gen] prefill {} tokens in {} ms ({} tok/s)",
         ids.len(),
@@ -449,6 +452,7 @@ fn draw_chat(
         mem_total_mb: p.ram_mb,
         tok_s_milli: rate_milli,
         pp_milli: p.pp_milli,
+        ftl_ms: p.ftl_ms,
         ctx_used: p.infer.pos as u32,
         ctx_max: p.infer.dims.ctx as u32,
         cores: p.cores,

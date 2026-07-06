@@ -5,8 +5,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 NightRun is a bare-metal x86_64 LLM appliance: a single `no_std` Rust UEFI
-application that boots from USB and runs Llama 3.2 1B (Q8_0) or
-Qwen3-4B-Instruct-2507 (Q4_K_M) with no OS.
+application that boots from USB and runs Llama 3.2 1B (Q8_0),
+Qwen3-4B-Instruct-2507 (Q4_K_M) or Granite 4.1 3B (Q4_K_M, dense
+transformer only — hybrid Granite is rejected at conversion) with no OS.
 It deliberately **stays in UEFI Boot Services** (for USB keyboard, disk
 reads, and MP services) — do not add `ExitBootServices`, and never call
 firmware services from AP worker code (`nr-tensor::parallel` workers are
@@ -59,9 +60,14 @@ cargo run --release -p nrhost -- models/model.nrm --prompt "..." [--raw] \
   llama.cpp for BOTH families (`crates/nr-model/tests/parity.rs`). If you
   touch kernels, rope, or the forward pass and parity breaks, the code is
   wrong — not the fixture. Family gotchas that already bit once: Qwen3
-  uses NEOX rope (half-split pairs) vs llama's adjacent pairs, has no BOS,
-  per-head Q/K RMSNorm before rope, and attention width (4096) != hidden
-  width (2560). Tokenizer fixtures (`tests/fixtures/tokenizer_cases*.txt`)
+  uses NEOX rope (half-split pairs) vs llama/granite's adjacent pairs,
+  Qwen has no BOS, per-head Q/K RMSNorm before rope, and attention width
+  (4096) != hidden width (2560). Granite has four muP scalars in the
+  header (embed/attn/residual/logit; neutral values elsewhere — attn 0.0
+  means 1/sqrt(head_dim)) and its /10 logit scaling makes greedy near-tie
+  flips vs llama.cpp more common (top-2 gap < ~0.4): pin parity on
+  prompts that match exactly, measure gaps with nrhost --debug-gap before
+  suspecting the engine. Tokenizer fixtures (`tests/fixtures/tokenizer_cases*.txt`)
   come from `scripts/gen_tokenizer_fixtures.py` + official HF tokenizers
   (with split_special_tokens=True — user text never encodes to control
   tokens); the Qwen chat template is pinned to `apply_chat_template`.

@@ -2,7 +2,8 @@
 
 **A bare-metal x86_64 LLM appliance.** NightRun boots straight from a USB
 stick into a synthwave chat terminal and runs **Qwen3-4B-Instruct-2507
-(Q4_K_M)** or **Llama 3.2 1B Instruct (Q8_0)** entirely on the CPU — no
+(Q4_K_M)**, **Granite 4.1 3B (Q4_K_M)** or **Llama 3.2 1B Instruct
+(Q8_0)** entirely on the CPU — no
 Linux, no GRUB, no operating system underneath. Everything on screen
 (boot splash, loading sequence, chat UI, inference, tokenizer) is our own
 Rust code running as a single UEFI application.
@@ -58,6 +59,13 @@ curl -L -o models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf \
   https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
 cargo run --release -p nrconvert -- \
   models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf models/qwen3-4b-q4km.nrm
+
+# IBM Granite 4.1 3B Q4_K_M (~2.0 GB) - dense transformer variant
+# (hybrid/SSM Granite artifacts are rejected at conversion)
+curl -L -o models/granite-4.1-3b-Q4_K_M.gguf \
+  https://huggingface.co/ibm-granite/granite-4.1-3b-GGUF/resolve/main/granite-4.1-3b-Q4_K_M.gguf
+cargo run --release -p nrconvert -- \
+  models/granite-4.1-3b-Q4_K_M.gguf models/granite-4.1-3b-q4km.nrm
 
 # Llama 3.2 1B Instruct Q8_0 (~1.3 GB) - smaller and faster
 curl -L -o models/Llama-3.2-1B-Instruct-Q8_0.gguf \
