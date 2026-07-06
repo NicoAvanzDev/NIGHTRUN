@@ -1,0 +1,10 @@
+[package]
+name = "nr-boot"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+uefi = { version = "0.38", features = ["alloc", "global_allocator"] }
+nr-gfx = { path = "../nr-gfx" }
+nr-ui = { path = "../nr-ui" }

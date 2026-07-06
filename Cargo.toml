@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/nr-boot",
+    "crates/nr-gfx",
+    "crates/nr-ui",
+    "tools/xtask",
+]
+# nr-boot only builds for x86_64-unknown-uefi; xtask drives that build.
+default-members = [
+    "crates/nr-gfx",
+    "crates/nr-ui",
+    "tools/xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+
+[profile.release.package.xtask]
+opt-level = 0
