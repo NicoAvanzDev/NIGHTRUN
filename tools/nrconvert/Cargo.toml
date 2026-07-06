@@ -1,0 +1,9 @@
+[package]
+name = "nrconvert"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nr-model = { path = "../../crates/nr-model" }
+nr-token = { path = "../../crates/nr-token" }

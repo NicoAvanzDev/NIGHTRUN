@@ -70,7 +70,11 @@ pub fn draw(surf: &mut Surface, fonts: &Fonts, st: &LoadState) {
     let bw = pw - 72;
     let by = py + ph - 96;
     let bh = 20;
-    let overall = ((st.current as u32 * 1000 + st.progress_pm.min(1000)) / st.stages.len().max(1) as u32).min(1000);
+    let overall = ((st.current.min(st.stages.len()) as u32)
+        .saturating_mul(1000)
+        .saturating_add(st.progress_pm.min(1000))
+        / st.stages.len().max(1) as u32)
+        .min(1000);
     bar(surf, bx, by, bw, bh, overall, st.frame);
 
     // Percent + detail.

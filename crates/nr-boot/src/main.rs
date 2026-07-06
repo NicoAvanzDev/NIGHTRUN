@@ -9,6 +9,7 @@ extern crate alloc;
 pub mod serial;
 mod app;
 mod input;
+mod modelload;
 mod video;
 
 use core::fmt::Write as _;

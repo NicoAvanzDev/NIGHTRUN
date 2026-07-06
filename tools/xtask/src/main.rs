@@ -9,6 +9,8 @@
 //!     --shot <t>:<path>   screendump PNG at t seconds (repeatable)
 //!     --keys <t>:<text>   type text at t seconds (repeatable; "\n" = Enter)
 
+mod image;
+
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -21,12 +23,35 @@ fn main() {
         Some("build") => {
             build_and_stage();
         }
+        Some("image") => {
+            build_image(true);
+        }
         Some("run") => run(parse_run_opts(&args[1..])),
         _ => {
-            eprintln!("usage: cargo xtask <build|run> [options]");
+            eprintln!("usage: cargo xtask <build|image|run> [options]");
             std::process::exit(2);
         }
     }
+}
+
+/// Build nightrun.img. When `fresh` (or no image exists) the whole image is
+/// rebuilt with the model; otherwise only BOOTX64.EFI is refreshed.
+fn build_image(fresh: bool) -> PathBuf {
+    let root = root();
+    build_and_stage();
+    let efi = root.join("target/x86_64-unknown-uefi/release/nr-boot.efi");
+    let img = root.join("nightrun.img");
+    if !fresh && img.exists() && image::update_efi(&img, &efi) {
+        println!("updated BOOTX64.EFI in {}", img.display());
+        return img;
+    }
+    let model = root.join("models/model.nrm");
+    let model = model.exists().then_some(model);
+    if model.is_none() {
+        println!("note: models/model.nrm missing - building image without model");
+    }
+    image::build(&img, &efi, model.as_deref());
+    img
 }
 
 fn root() -> PathBuf {
@@ -61,6 +86,7 @@ fn build_and_stage() -> PathBuf {
 #[derive(Default)]
 struct RunOpts {
     window: bool,
+    img: bool,
     mem: Option<String>,
     secs: Option<u64>,
     shots: Vec<(u64, String)>,
@@ -74,6 +100,7 @@ fn parse_run_opts(args: &[String]) -> RunOpts {
         let mut val = || it.next().expect("missing value").clone();
         match a.as_str() {
             "--window" => o.window = true,
+            "--img" => o.img = true,
             "--mem" => o.mem = Some(val()),
             "--secs" => o.secs = Some(val().parse().unwrap()),
             "--shot" => {
@@ -93,8 +120,17 @@ fn parse_run_opts(args: &[String]) -> RunOpts {
 }
 
 fn run(opts: RunOpts) {
-    let esp = build_and_stage();
     let root = root();
+    // --img boots the real GPT/FAT32 image (required for the model, which
+    // exceeds QEMU's virtual-FAT limits); the default boots the staged ESP
+    // directory for a fast dev loop.
+    let boot_drive = if opts.img {
+        let img = build_image(false);
+        format!("format=raw,file={}", img.display())
+    } else {
+        let esp = build_and_stage();
+        format!("format=raw,file=fat:rw:{}", esp.display())
+    };
     let target = root.join("target");
 
     let ovmf_code = "/usr/share/OVMF/OVMF_CODE_4M.fd";
@@ -115,7 +151,7 @@ fn run(opts: RunOpts) {
         .args(["-m", opts.mem.as_deref().unwrap_or("2G")])
         .args(["-drive", &format!("if=pflash,format=raw,readonly=on,file={ovmf_code}")])
         .args(["-drive", &format!("if=pflash,format=raw,file={}", vars.display())])
-        .args(["-drive", &format!("format=raw,file=fat:rw:{}", esp.display())])
+        .args(["-drive", &boot_drive])
         .args(["-serial", &format!("file:{}", serial_log.display())])
         .args(["-qmp", &format!("unix:{},server=on,wait=off", qmp_sock.display())])
         .args(["-monitor", "none"]);

@@ -1,13 +1,16 @@
-//! M2 application shell: splash -> boot sequence -> chat loop.
+//! Application shell: splash -> boot sequence (real model load) -> chat.
 //!
-//! The chat responses are an explicitly-labelled shell demo until the
-//! inference engine lands (Milestone 5).
+//! M4 status: the model is loaded, checksummed and parsed, and the real
+//! tokenizer runs; chat replies demonstrate tokenization until the
+//! inference engine lands (M5).
 
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::time::Duration;
 
+use nr_model::Model;
 use nr_runtime::{Arena, Clock};
+use nr_token::Tokenizer;
 use nr_ui::chat::{Role, Stats, Turn};
 use nr_ui::loading::LoadState;
 use nr_ui::Fonts;
@@ -17,8 +20,7 @@ use uefi::boot::{AllocateType, MemoryType};
 use crate::input::{self, InputEvent};
 use crate::video::Display;
 
-const ARENA_MB: usize = 192;
-const MODEL_NAME: &str = "SHELL DEMO (inference in M5)";
+const ARENA_MB: usize = 256;
 
 fn stall_us(us: u64) {
     boot::stall(Duration::from_micros(us));
@@ -30,18 +32,20 @@ pub struct Platform {
     pub clock: Clock,
     pub arena: Arena,
     pub ram_mb: u32,
+    pub model: Model<'static>,
+    pub tokenizer: Tokenizer<'static>,
+    pub model_name: String,
 }
 
 pub fn run(display: Display) {
     let fonts = Fonts::load();
     let mut surf = nr_gfx::Surface::new(display.width, display.height);
 
-    // Splash: shown until a key is pressed or ~2.5 s passes.
     let footer = alloc::format!("v{}  //  press any key", crate::VERSION);
     nr_ui::splash::draw(&mut surf, &fonts, &footer);
     display.present(&surf);
     serial_println!("[app] splash");
-    for _ in 0..250 {
+    for _ in 0..200 {
         if input::poll().is_some() {
             break;
         }
@@ -51,72 +55,144 @@ pub fn run(display: Display) {
     let clock = Clock::calibrate(stall_us);
     let mut platform = boot_sequence(display, fonts, clock, &mut surf);
     serial_println!(
-        "[app] boot sequence done: ram={} MB arena={} MB",
-        platform.ram_mb,
-        platform.arena.capacity() / (1024 * 1024)
+        "[app] ready: model '{}' {} MB, ram {} MB",
+        platform.model_name,
+        platform.model.total_size() / (1024 * 1024),
+        platform.ram_mb
     );
 
     chat_loop(&mut platform, &mut surf);
 }
 
-/// The staged boot/loading sequence. Memory scan and arena allocation are
-/// real; the "model" stage is a placeholder pending M4/M5.
-fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx::Surface) -> Platform {
-    let stages = [
-        "initializing runtime",
-        "scanning memory",
-        "allocating resident arena",
-        "preparing model stage (placeholder)",
-        "starting chat interface",
-    ];
-    let mut frame = 0u32;
-    let mut show = |current: usize, pm: u32, detail: &str, frame: &mut u32| {
-        let st = LoadState { stages: &stages, current, progress_pm: pm, detail, frame: *frame };
-        nr_ui::loading::draw(surf, &fonts, &st);
-        display.present(surf);
-        *frame += 1;
-    };
+const STAGES: &[&str] = &[
+    "initializing runtime",
+    "scanning memory",
+    "loading model into RAM",
+    "verifying checksums",
+    "allocating resident arena",
+    "starting chat interface",
+];
 
-    // Stage 0: runtime init (clock already calibrated).
-    for pm in [200, 600, 1000] {
-        show(0, pm, "calibrating TSC clock", &mut frame);
-        stall_us(90_000);
+struct BootUi<'a> {
+    display: &'a Display,
+    surf: &'a mut nr_gfx::Surface,
+    fonts: &'a Fonts,
+    frame: u32,
+}
+
+impl BootUi<'_> {
+    fn show(&mut self, current: usize, pm: u32, detail: &str) {
+        let st = LoadState { stages: STAGES, current, progress_pm: pm, detail, frame: self.frame };
+        nr_ui::loading::draw(self.surf, self.fonts, &st);
+        self.display.present(self.surf);
+        self.frame += 1;
     }
 
-    // Stage 1: memory scan (real memory map walk).
-    show(1, 300, "reading UEFI memory map", &mut frame);
-    let ram_mb = conventional_ram_mb();
-    let detail = alloc::format!("{} MB conventional RAM", ram_mb);
-    show(1, 1000, &detail, &mut frame);
-    stall_us(250_000);
+    fn fail(&mut self, message: &str) -> ! {
+        serial_println!("[boot] FATAL: {}", message);
+        let st = LoadState { stages: STAGES, current: usize::MAX, progress_pm: 0, detail: message, frame: self.frame };
+        nr_ui::loading::draw(self.surf, self.fonts, &st);
+        self.display.present(self.surf);
+        loop {
+            unsafe { core::arch::asm!("hlt") };
+        }
+    }
+}
 
-    // Stage 2: arena allocation (real pages, touched).
+fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx::Surface) -> Platform {
+    let t_boot = clock.now();
+    let mut ui = BootUi { display: &display, surf, fonts: &fonts, frame: 0 };
+
+    // Stage 0: runtime init.
+    ui.show(0, 500, "TSC clock calibrated");
+    let simd = if nr_tensor_fast() { "AVX2+FMA kernels" } else { "scalar kernels (no AVX2)" };
+    ui.show(0, 1000, simd);
+    stall_us(120_000);
+
+    // Stage 1: memory scan.
+    let ram_mb = conventional_ram_mb();
+    ui.show(1, 1000, &alloc::format!("{ram_mb} MB conventional RAM"));
+    stall_us(120_000);
+
+    // Stage 2: load model.nrm into RAM (chunked reads off the boot volume).
+    let t0 = clock.now();
+    let blob: &'static [u8] = {
+        let ui = &mut ui;
+        let clock = &clock;
+        let mut cb = |done: usize, total: usize| {
+            let pm = (done as u64 * 1000 / total.max(1) as u64) as u32;
+            let mbs = {
+                let ms = clock.ticks_to_ms(clock.now() - t0).max(1);
+                done as u64 * 1000 / ms / (1024 * 1024)
+            };
+            ui.show(2, pm, &alloc::format!(
+                "{} / {} MB  ({} MB/s)",
+                done / (1024 * 1024),
+                total / (1024 * 1024),
+                mbs
+            ));
+        };
+        match crate::modelload::load(&mut cb) {
+            Ok(buf) => buf,
+            Err(e) => ui.fail(&alloc::format!(
+                "model.nrm load failed ({e:?}) - build the image with: cargo xtask image"
+            )),
+        }
+    };
+    let load_ms = clock.ticks_to_ms(clock.now() - t0);
+    serial_println!("[boot] model loaded: {} bytes in {} ms", blob.len(), load_ms);
+
+    // Stage 3: parse + verify.
+    let model = match Model::parse(blob) {
+        Ok(m) => m,
+        Err(e) => ui.fail(&alloc::format!("model.nrm invalid: {e:?}")),
+    };
+    let t0 = clock.now();
+    let ok = model.verify_data(|done, total| {
+        let pm = (done as u64 * 1000 / total.max(1) as u64) as u32;
+        ui.show(3, pm, &alloc::format!("CRC32 {} / {} MB", done / (1024 * 1024), total / (1024 * 1024)));
+    });
+    if !ok {
+        ui.fail("tensor data checksum mismatch - rebuild model.nrm");
+    }
+    let verify_ms = clock.ticks_to_ms(clock.now() - t0);
+    let tokenizer = match Tokenizer::parse(model.tokenizer_blob) {
+        Ok(t) => t,
+        Err(e) => ui.fail(&alloc::format!("tokenizer blob invalid: {e:?}")),
+    };
+    serial_println!(
+        "[boot] verified in {} ms; vocab={} layers={}",
+        verify_ms,
+        tokenizer.vocab_len(),
+        model.meta.n_layers
+    );
+
+    // Stage 4: arena.
     let pages = ARENA_MB * 1024 * 1024 / 4096;
-    let base = boot::allocate_pages(AllocateType::AnyPages, MemoryType::LOADER_DATA, pages)
-        .expect("arena pages");
+    let base = match boot::allocate_pages(AllocateType::AnyPages, MemoryType::LOADER_DATA, pages) {
+        Ok(b) => b,
+        Err(_) => ui.fail("arena allocation failed - machine needs more RAM"),
+    };
     // SAFETY: freshly allocated, exclusively owned.
     let mut arena = unsafe { Arena::new(base.as_ptr(), pages * 4096) };
-    let chunk = 16 * 1024 * 1024;
-    for (i, off) in (0..ARENA_MB * 1024 * 1024).step_by(chunk).enumerate() {
-        // Touch the memory for real.
-        unsafe { core::ptr::write_bytes(base.as_ptr().add(off), 0, chunk) };
-        let pm = ((off + chunk) as u64 * 1000 / (ARENA_MB * 1024 * 1024) as u64) as u32;
-        let detail = alloc::format!("{} / {} MB zeroed", (i + 1) * 16, ARENA_MB);
-        show(2, pm, &detail, &mut frame);
+    for off in (0..pages * 4096).step_by(16 * 1024 * 1024) {
+        let len = (16 * 1024 * 1024).min(pages * 4096 - off);
+        unsafe { core::ptr::write_bytes(base.as_ptr().add(off), 0, len) };
+        ui.show(4, ((off + len) * 1000 / (pages * 4096)) as u32, &alloc::format!("{ARENA_MB} MB resident arena"));
     }
-    let _ = arena.alloc_bytes(64, 64); // reserve a guard so `used` is non-zero
+    let _ = arena.alloc_bytes(64, 64);
 
-    // Stage 3: model placeholder.
-    for pm in (0..=1000).step_by(125) {
-        show(3, pm, "model loading arrives in milestone 4", &mut frame);
-        stall_us(60_000);
-    }
+    // Stage 5: done.
+    let boot_ms = clock.ticks_to_ms(clock.now() - t_boot);
+    ui.show(5, 1000, &alloc::format!("boot sequence {}.{}s", boot_ms / 1000, boot_ms % 1000 / 100));
+    stall_us(400_000);
 
-    // Stage 4: chat.
-    show(4, 1000, "ready", &mut frame);
-    stall_us(300_000);
+    let model_name = alloc::format!("{} Q8_0", model.meta.name_str());
+    Platform { display, fonts, clock, arena, ram_mb, model, tokenizer, model_name }
+}
 
-    Platform { display, fonts, clock, arena, ram_mb }
+fn nr_tensor_fast() -> bool {
+    nr_tensor::cpu::fast_path()
 }
 
 fn conventional_ram_mb() -> u32 {
@@ -138,8 +214,10 @@ fn chat_loop(p: &mut Platform, surf: &mut nr_gfx::Surface) {
     let mut turns: Vec<Turn> = Vec::new();
     turns.push(Turn {
         role: Role::System,
-        text: String::from(
-            "NightRun shell online. This build is the M2 runtime shell - responses below are canned demo text, not model output.",
+        text: alloc::format!(
+            "{} loaded and verified in RAM. Tokenizer online ({} tokens). Generation lands in M5 - replies below show real tokenizer output.",
+            p.model_name,
+            p.tokenizer.vocab_len(),
         ),
     });
     let mut inputline = String::new();
@@ -159,8 +237,8 @@ fn chat_loop(p: &mut Platform, surf: &mut nr_gfx::Surface) {
                     if !inputline.trim().is_empty() {
                         let prompt = core::mem::take(&mut inputline);
                         serial_println!("[chat] user: {}", prompt);
-                        turns.push(Turn { role: Role::User, text: prompt });
-                        last_rate = mock_generate(p, surf, &mut turns, frame);
+                        turns.push(Turn { role: Role::User, text: prompt.clone() });
+                        last_rate = tokenize_demo(p, &prompt, &mut turns);
                     } else {
                         inputline.clear();
                     }
@@ -169,8 +247,6 @@ fn chat_loop(p: &mut Platform, surf: &mut nr_gfx::Surface) {
             }
         }
 
-        // Redraw at ~30 Hz for cursor blink; cheap enough and keeps the
-        // screen owned by us.
         if dirty || frame % 8 == 0 {
             draw_chat(p, surf, &turns, &inputline, frame, last_rate, false);
         }
@@ -189,8 +265,8 @@ fn draw_chat(
     generating: bool,
 ) {
     let stats = Stats {
-        model: MODEL_NAME,
-        mem_used_mb: (p.arena.used() / (1024 * 1024)) as u32,
+        model: &p.model_name,
+        mem_used_mb: ((p.model.total_size() + p.arena.used()) / (1024 * 1024)) as u32,
         mem_total_mb: p.ram_mb,
         tok_s_milli: rate_milli,
         generating,
@@ -200,34 +276,33 @@ fn draw_chat(
     p.display.present(surf);
 }
 
-/// Stream a canned response word-by-word, measuring a real "rate" for the
-/// status bar plumbing. Returns milli-tok/s.
-fn mock_generate(p: &mut Platform, surf: &mut nr_gfx::Surface, turns: &mut Vec<Turn>, mut frame: u32) -> u32 {
-    const REPLY: &str = "I am the NightRun runtime shell. The full Llama 3.2 inference engine \
-        docks here in milestone 5; right now I demonstrate the boot path, framebuffer UI, \
-        keyboard input, and streaming display you are looking at. Everything on screen is \
-        rendered by our own bare-metal code - no operating system underneath.";
-
-    turns.push(Turn { role: Role::Llama, text: String::new() });
+/// M4 placeholder reply: run the real tokenizer over the prompt and report
+/// what the inference engine will see. Returns milli-tokens/sec (encode).
+fn tokenize_demo(p: &mut Platform, prompt: &str, turns: &mut Vec<Turn>) -> u32 {
     let t0 = p.clock.now();
-    let mut words = 0u64;
-    let word_count = REPLY.split(' ').count();
-    for (i, word) in REPLY.split(' ').enumerate() {
-        {
-            let last = turns.last_mut().unwrap();
-            if !last.text.is_empty() {
-                last.text.push(' ');
-            }
-            last.text.push_str(word);
+    let mut ids: Vec<u32> = Vec::new();
+    p.tokenizer.encode_text(prompt, &mut ids);
+    let dt = p.clock.now() - t0;
+    let rate = p.clock.rate_milli(ids.len() as u64, dt);
+
+    let mut text = alloc::format!("[tokenizer] {} tokens: ", ids.len());
+    for (i, id) in ids.iter().take(24).enumerate() {
+        if i > 0 {
+            text.push(' ');
         }
-        words += 1;
-        let rate = p.clock.rate_milli(words, p.clock.now() - t0);
-        let generating = i + 1 < word_count;
-        draw_chat(p, surf, turns, "", frame, rate, generating);
-        frame = frame.wrapping_add(1);
-        stall_us(65_000);
+        text.push_str(&alloc::format!("{id}"));
     }
-    let rate = p.clock.rate_milli(words, p.clock.now() - t0);
-    serial_println!("[chat] llama reply streamed, {} words, {} milli-wps", words, rate);
+    if ids.len() > 24 {
+        text.push_str(" ...");
+    }
+    text.push_str(" | decoded: ");
+    for &id in ids.iter().take(24) {
+        if let Ok(s) = core::str::from_utf8(p.tokenizer.token_bytes(id)) {
+            text.push_str(&alloc::format!("[{s}]"));
+        }
+    }
+    text.push_str(" | the inference engine plugs in here in M5.");
+    turns.push(Turn { role: Role::Llama, text });
+    serial_println!("[chat] tokenized {} tokens", ids.len());
     rate
 }
