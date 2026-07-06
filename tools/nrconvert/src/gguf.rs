@@ -59,6 +59,9 @@ impl Value {
 pub const GGML_F32: u32 = 0;
 pub const GGML_F16: u32 = 1;
 pub const GGML_Q8_0: u32 = 8;
+pub const GGML_Q4_K: u32 = 12;
+pub const GGML_Q5_K: u32 = 13;
+pub const GGML_Q6_K: u32 = 14;
 
 #[derive(Debug)]
 pub struct TensorInfo {
@@ -81,6 +84,9 @@ pub fn tensor_byte_size(dtype: u32, nelem: u64) -> u64 {
         GGML_F32 => nelem * 4,
         GGML_F16 => nelem * 2,
         GGML_Q8_0 => nelem / 32 * 34,
+        GGML_Q4_K => nelem / 256 * 144,
+        GGML_Q5_K => nelem / 256 * 176,
+        GGML_Q6_K => nelem / 256 * 210,
         _ => panic!("unsupported ggml dtype {dtype}"),
     }
 }

@@ -28,10 +28,66 @@ struct OutTensor<'a> {
     offset: u64,
 }
 
+/// GGML dtype id -> human name for the formats we care about.
+fn ggml_dtype_name(t: u32) -> String {
+    match t {
+        0 => "F32".into(),
+        1 => "F16".into(),
+        8 => "Q8_0".into(),
+        12 => "Q4_K".into(),
+        13 => "Q5_K".into(),
+        14 => "Q6_K".into(),
+        other => format!("ggml_type_{other}"),
+    }
+}
+
+/// Dump the per-tensor dtype table of a GGUF without converting.
+fn inspect(input: &str) {
+    let g = gguf::parse(input);
+    let arch = g.kv.get("general.architecture").and_then(gguf::Value::as_str).unwrap_or("?");
+    let name = g.kv.get("general.name").and_then(gguf::Value::as_str).unwrap_or("?");
+    println!("arch={arch} name={name:?} tensors={}", g.tensors.len());
+    for key in [
+        "embedding_length",
+        "block_count",
+        "attention.head_count",
+        "attention.head_count_kv",
+        "attention.key_length",
+        "feed_forward_length",
+        "rope.freq_base",
+        "attention.layer_norm_rms_epsilon",
+        "context_length",
+    ] {
+        let k = format!("{arch}.{key}");
+        if let Some(v) = g.kv.get(&k) {
+            println!("  {k} = {v:?}");
+        }
+    }
+    // Aggregate dtype mix per tensor role (strip blk.N. prefixes).
+    let mut by_role: std::collections::BTreeMap<(String, String), (u32, u64)> = Default::default();
+    for t in &g.tensors {
+        let role = match t.name.strip_prefix("blk.") {
+            Some(rest) => rest.split_once('.').map(|(_, r)| r.to_string()).unwrap_or(rest.into()),
+            None => t.name.clone(),
+        };
+        let e = by_role.entry((role, ggml_dtype_name(t.dtype))).or_insert((0, 0));
+        e.0 += 1;
+        e.1 += t.byte_size;
+    }
+    println!("{:<28} {:>6} {:>5} {:>9}", "role", "dtype", "count", "MB");
+    for ((role, dtype), (count, bytes)) in &by_role {
+        println!("{role:<28} {dtype:>6} {count:>5} {:>9.1}", *bytes as f64 / (1024.0 * 1024.0));
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let ["--inspect", input] = &args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
+        inspect(input);
+        return;
+    }
     let [input, output] = &args[..] else {
-        eprintln!("usage: nrconvert <input.gguf> <output.nrm>");
+        eprintln!("usage: nrconvert <input.gguf> <output.nrm> | nrconvert --inspect <input.gguf>");
         std::process::exit(2);
     };
 

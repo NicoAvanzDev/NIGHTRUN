@@ -9,6 +9,7 @@
 pub mod cpu;
 pub mod f16;
 pub mod kernels;
+pub mod kquant;
 pub mod parallel;
 pub mod q8;
 pub mod rope;
