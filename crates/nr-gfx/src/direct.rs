@@ -41,7 +41,10 @@ impl DirectFb {
         let c = self.encode(color);
         let mut pen = x;
         for ch in s.chars() {
-            let glyph = font.glyph(ch);
+            let Some(glyph) = font.glyph(ch).or_else(|| font.glyph('?')) else {
+                pen += font.width;
+                continue;
+            };
             for gy in 0..font.height {
                 for gx in 0..font.width {
                     if font.pixel(glyph, gx, gy) {

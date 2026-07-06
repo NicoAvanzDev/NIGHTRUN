@@ -58,7 +58,12 @@ pub fn text_fx(
     let gw = font.width * scale;
     let mut pen_x = x;
     for ch in s.chars() {
-        let glyph = font.glyph(ch);
+        // No glyph: try an ASCII lookalike; otherwise advance the pen,
+        // leaving a clean gap (e.g. emoji).
+        let Some(glyph) = font.glyph(ch).or_else(|| font.glyph(substitute(ch)?)) else {
+            pen_x += gw as i32 + tracking;
+            continue;
+        };
         for gy in 0..gh {
             let src_y = gy / scale;
             let shift = shear * (gh - 1 - gy) as i32 / gh.max(1) as i32;
@@ -75,6 +80,15 @@ pub fn text_fx(
         }
         pen_x += gw as i32 + tracking;
     }
+}
+
+/// ASCII lookalikes for typographic characters the fonts lack.
+pub fn substitute(ch: char) -> Option<char> {
+    Some(match ch {
+        '\u{2014}' | '\u{2015}' | '\u{2212}' => '-', // em dash, horizontal bar, minus
+        '\u{00a0}' | '\u{2009}' | '\u{202f}' => ' ', // nbsp, thin spaces
+        _ => return None,
+    })
 }
 
 /// Soft neon glow behind text: several blended, offset copies.

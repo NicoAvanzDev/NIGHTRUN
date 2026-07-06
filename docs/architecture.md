@@ -170,7 +170,10 @@ heap-free framebuffer writes.
   the conversation auto-resets when full. No KV eviction/sliding window.
 - Prefill is unbatched (see above).
 - Pretokenizer is an approximation outside common Unicode classes.
-- Glyph coverage is ASCII: model output outside it (emoji, CJK) renders
-  as `?` in the chat UI (the tokenizer handles it correctly).
+- Glyph coverage follows the Spleen fonts' unicode tables (ASCII,
+  Latin-1/Extended-A incl. Polish, typographic punctuation, Greek,
+  Cyrillic where provided); em-dash substitutes '-'. Codepoints without
+  a glyph (emoji, CJK) render as a clean gap — never as a substituted
+  '?' (the tokenizer and history keep the exact text either way).
 - Requires UEFI; no legacy BIOS path.
 - Firmware keyboard repeat/rollover behaviour varies between vendors.
