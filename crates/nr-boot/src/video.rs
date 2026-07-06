@@ -60,4 +60,14 @@ impl Display {
     pub fn present(&self, surf: &Surface) {
         unsafe { surf.present(self.fb, self.stride, self.layout) }
     }
+
+    pub fn direct(&self) -> nr_gfx::direct::DirectFb {
+        nr_gfx::direct::DirectFb {
+            ptr: self.fb,
+            width: self.width,
+            height: self.height,
+            stride: self.stride,
+            layout: self.layout,
+        }
+    }
 }

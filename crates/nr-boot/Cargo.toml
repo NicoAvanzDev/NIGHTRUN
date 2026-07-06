@@ -7,4 +7,5 @@ license.workspace = true
 [dependencies]
 uefi = { version = "0.38", features = ["alloc", "global_allocator"] }
 nr-gfx = { path = "../nr-gfx" }
+nr-runtime = { path = "../nr-runtime" }
 nr-ui = { path = "../nr-ui" }

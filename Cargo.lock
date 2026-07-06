@@ -31,12 +31,17 @@ name = "nr-boot"
 version = "0.1.0"
 dependencies = [
  "nr-gfx",
+ "nr-runtime",
  "nr-ui",
  "uefi",
 ]
 
 [[package]]
 name = "nr-gfx"
+version = "0.1.0"
+
+[[package]]
+name = "nr-runtime"
 version = "0.1.0"
 
 [[package]]

@@ -8,6 +8,7 @@
 extern crate alloc;
 
 pub mod color;
+pub mod direct;
 pub mod draw;
 pub mod font;
 pub mod surface;

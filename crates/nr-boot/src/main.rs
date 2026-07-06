@@ -1,5 +1,4 @@
-//! NightRun boot layer: UEFI entry, platform bring-up, and (for now) the
-//! M1 splash + keyboard echo loop.
+//! NightRun boot layer: UEFI entry, platform bring-up, panic screen.
 
 #![no_std]
 #![no_main]
@@ -8,13 +7,16 @@ extern crate alloc;
 
 #[macro_use]
 pub mod serial;
+mod app;
+mod input;
 mod video;
 
-use alloc::string::String;
-use uefi::prelude::*;
-use uefi::proto::console::text::Key;
+use core::fmt::Write as _;
+use core::sync::atomic::{AtomicPtr, Ordering};
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+use uefi::prelude::*;
+
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[entry]
 fn main() -> Status {
@@ -23,60 +25,77 @@ fn main() -> Status {
     uefi::helpers::init().expect("uefi helpers");
 
     let display = video::init();
-    let mut surf = nr_gfx::Surface::new(display.width, display.height);
-    let fonts = nr_ui::Fonts::load();
+    install_panic_fb(&display);
 
-    let footer = alloc::format!("NIGHTRUN v{}  //  TYPE TO ECHO  //  SERIAL COM1 115200", VERSION);
-    nr_ui::splash::draw(&mut surf, &fonts, &footer);
-    display.present(&surf);
-    serial_println!("[nightrun] splash presented, entering input loop");
-
-    echo_loop(&display, &mut surf, &fonts, &footer);
-
+    app::run(display);
     Status::SUCCESS
 }
 
-/// M1 proof of input: typed characters echo onto the splash footer area.
-fn echo_loop(display: &video::Display, surf: &mut nr_gfx::Surface, fonts: &nr_ui::Fonts, footer: &str) {
-    let mut line = String::new();
-    loop {
-        let key = uefi::system::with_stdin(|stdin| stdin.read_key().ok().flatten());
-        let Some(key) = key else {
-            boot::stall(core::time::Duration::from_millis(10));
-            continue;
-        };
-        match key {
-            Key::Printable(c) => {
-                let ch = char::from(c);
-                match ch {
-                    '\u{8}' => {
-                        line.pop();
-                    }
-                    '\r' => line.clear(),
-                    c if !c.is_control() => line.push(c),
-                    _ => {}
-                }
-            }
-            Key::Special(_) => continue,
-        }
-        serial_println!("[input] line: {:?}", line);
+// ---- Panic screen ----------------------------------------------------------
 
-        // Redraw the echo band above the footer.
-        let w = surf.width as i32;
-        let h = surf.height as i32;
-        let y = h - 64;
-        surf.fill_rect(0, y, w, 28, nr_gfx::theme::BG_DEEP);
-        let shown = alloc::format!("user: {}_", line);
-        nr_gfx::draw::text(surf, &fonts.body, 24, y, &shown, nr_gfx::theme::NEON_CYAN, 1, 0);
-        let _ = footer;
-        display.present(surf);
+static PANIC_FB: AtomicPtr<nr_gfx::direct::DirectFb> = AtomicPtr::new(core::ptr::null_mut());
+
+fn install_panic_fb(display: &video::Display) {
+    let fb = alloc::boxed::Box::leak(alloc::boxed::Box::new(display.direct()));
+    PANIC_FB.store(fb, Ordering::Release);
+}
+
+/// Fixed-size formatting buffer usable during panic (no heap).
+struct PanicBuf {
+    buf: [u8; 512],
+    len: usize,
+}
+
+impl core::fmt::Write for PanicBuf {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        let n = s.len().min(self.buf.len() - self.len);
+        self.buf[self.len..self.len + n].copy_from_slice(&s.as_bytes()[..n]);
+        self.len += n;
+        Ok(())
     }
 }
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     serial_println!("[panic] {}", info);
+
+    let fb_ptr = PANIC_FB.load(Ordering::Acquire);
+    if !fb_ptr.is_null() {
+        // SAFETY: set once from a leaked box; framebuffer stays mapped.
+        let fb = unsafe { &*fb_ptr };
+        let mut msg = PanicBuf { buf: [0; 512], len: 0 };
+        let _ = write!(msg, "{}", info);
+        draw_panic_screen(fb, core::str::from_utf8(&msg.buf[..msg.len]).unwrap_or("panic"));
+    }
+
     loop {
         unsafe { core::arch::asm!("hlt") };
+    }
+}
+
+fn draw_panic_screen(fb: &nr_gfx::direct::DirectFb, msg: &str) {
+    use nr_gfx::theme;
+    static SMALL: &[u8] = include_bytes!("../../../assets/fonts/spleen-8x16.psfu");
+    let Some(font) = nr_gfx::PsfFont::parse(SMALL) else { return };
+
+    fb.fill_rect(0, 0, fb.width, fb.height, 0x12021c);
+    let band_y = fb.height / 4;
+    fb.fill_rect(0, band_y, fb.width, 4, theme::NEON_MAGENTA);
+    fb.fill_rect(0, band_y + 90, fb.width, 4, theme::NEON_MAGENTA);
+    fb.text(&font, 48, band_y + 28, "NIGHTRUN // SYSTEM FAULT", theme::NEON_MAGENTA);
+    fb.text(&font, 48, band_y + 56, "the runtime hit an unrecoverable error - power cycle to restart", theme::TEXT_DIM);
+
+    // Wrapped panic message.
+    let cols = (fb.width - 96) / font.width;
+    let mut y = band_y + 130;
+    let bytes = msg.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && y < fb.height - 32 {
+        let end = (i + cols).min(bytes.len());
+        if let Ok(line) = core::str::from_utf8(&bytes[i..end]) {
+            fb.text(&font, 48, y, line, theme::TEXT_PRIMARY);
+        }
+        i = end;
+        y += font.height + 4;
     }
 }
