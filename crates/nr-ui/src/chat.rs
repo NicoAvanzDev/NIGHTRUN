@@ -56,6 +56,9 @@ const MARGIN: i32 = 24;
 const STATUS_H: i32 = 40;
 const INPUT_H: i32 = 46;
 
+/// Draw the chat screen. `scroll` is how many lines the view is scrolled
+/// up from the newest; the clamped value is returned so callers can keep
+/// their scroll state within range.
 pub fn draw(
     surf: &mut Surface,
     fonts: &Fonts,
@@ -63,12 +66,20 @@ pub fn draw(
     input: &str,
     cursor_on: bool,
     stats: &Stats,
-) {
+    scroll: usize,
+) -> usize {
     surf.clear(theme::BG_DEEP);
     status_bar(surf, fonts, stats);
     input_bar(surf, fonts, input, cursor_on, stats.generating);
-    scrollback(surf, fonts, turns, stats.generating);
+    let scroll = scrollback(surf, fonts, turns, stats.generating, scroll);
     draw::scanlines(surf, 26);
+    scroll
+}
+
+/// Lines the screen can show at once (for page-sized scroll steps).
+pub fn page_lines(surf: &Surface, fonts: &Fonts) -> usize {
+    let line_h = fonts.body.height as i32 + 2;
+    (((surf.height as i32 - INPUT_H - 10) - (STATUS_H + 10)) / line_h).max(1) as usize
 }
 
 fn status_bar(surf: &mut Surface, fonts: &Fonts, stats: &Stats) {
@@ -152,7 +163,7 @@ fn input_bar(surf: &mut Surface, fonts: &Fonts, input: &str, cursor_on: bool, ge
     }
 }
 
-fn scrollback(surf: &mut Surface, fonts: &Fonts, turns: &[Turn], generating: bool) {
+fn scrollback(surf: &mut Surface, fonts: &Fonts, turns: &[Turn], generating: bool, scroll: usize) -> usize {
     let f = &fonts.body;
     let w = surf.width as i32;
     let h = surf.height as i32;
@@ -187,12 +198,15 @@ fn scrollback(surf: &mut Surface, fonts: &Fonts, turns: &[Turn], generating: boo
         }
     }
 
-    // Bottom-anchored: keep the last lines that fit.
+    // Bottom-anchored window, shifted up by `scroll` lines.
     let line_h = f.height as i32 + 2;
     let max_lines = ((bottom - top) / line_h).max(1) as usize;
-    let start = lines.len().saturating_sub(max_lines);
+    let max_scroll = lines.len().saturating_sub(max_lines);
+    let scroll = scroll.min(max_scroll);
+    let end = lines.len() - scroll;
+    let start = end.saturating_sub(max_lines);
     let mut y = top;
-    for (color, indent, line) in &lines[start..] {
+    for (color, indent, line) in &lines[start..end] {
         if !line.is_empty() {
             // Prefix in role color, continuation text in primary.
             let has_prefix = *indent == 0 && (line.starts_with("user:") || line.starts_with("llama:"));
@@ -209,6 +223,21 @@ fn scrollback(surf: &mut Surface, fonts: &Fonts, turns: &[Turn], generating: boo
         }
         y += line_h;
     }
+
+    // History indicator while scrolled up.
+    if scroll > 0 {
+        let f = &fonts.small;
+        let mut label = String::from("^ history  ");
+        fmt_u32(&mut label, scroll as u32);
+        label.push_str(" lines below - DOWN for newest");
+        let tw = draw::text_width(f, &label, 1, 0);
+        let x = surf.width as i32 - MARGIN - tw - 12;
+        surf.fill_rect(x - 8, top, tw + 16, f.height as i32 + 8, theme::BG_PANEL);
+        surf.fill_rect(x - 8, top, tw + 16, 1, theme::BORDER);
+        surf.fill_rect(x - 8, top + f.height as i32 + 7, tw + 16, 1, theme::BORDER);
+        draw::text(surf, f, x, top + 4, &label, theme::NEON_CYAN, 1, 0);
+    }
+    scroll
 }
 
 /// Word wrap to `cols` columns. If `cursor_tail`, append a streaming marker.

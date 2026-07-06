@@ -10,6 +10,8 @@ pub enum InputEvent {
     Escape,
     Up,
     Down,
+    PageUp,
+    PageDown,
 }
 
 /// Non-blocking poll for one key event.
@@ -29,6 +31,8 @@ pub fn poll() -> Option<InputEvent> {
             ScanCode::ESCAPE => Some(InputEvent::Escape),
             ScanCode::UP => Some(InputEvent::Up),
             ScanCode::DOWN => Some(InputEvent::Down),
+            ScanCode::PAGE_UP => Some(InputEvent::PageUp),
+            ScanCode::PAGE_DOWN => Some(InputEvent::PageDown),
             _ => None,
         },
     }

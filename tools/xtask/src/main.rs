@@ -188,10 +188,11 @@ fn run(opts: RunOpts) {
     let target = root.join("target");
 
     let ovmf_code = "/usr/share/OVMF/OVMF_CODE_4M.fd";
+    // Fresh vars every run: stale boot entries (e.g. from a run with
+    // different media attached) can send the firmware down PXE instead of
+    // our drive.
     let vars = target.join("OVMF_VARS.fd");
-    if !vars.exists() {
-        std::fs::copy("/usr/share/OVMF/OVMF_VARS_4M.fd", &vars).expect("copy OVMF vars");
-    }
+    std::fs::copy("/usr/share/OVMF/OVMF_VARS_4M.fd", &vars).expect("copy OVMF vars");
 
     let qmp_sock = target.join("qmp.sock");
     let _ = std::fs::remove_file(&qmp_sock);
@@ -353,6 +354,36 @@ impl Qmp {
     }
 
     fn type_text(&mut self, text: &str) {
+        // Special keys spelled as tokens, e.g. "<up><up><down>".
+        let mut rest = text;
+        while let Some(i) = rest.find('<') {
+            let (head, tail) = rest.split_at(i);
+            self.type_plain(head);
+            if let Some(end) = tail.find('>') {
+                let key = match &tail[1..end] {
+                    "up" => "up",
+                    "down" => "down",
+                    "pgup" => "pgup",
+                    "pgdn" => "pgdn",
+                    "esc" => "esc",
+                    other => {
+                        eprintln!("unknown key token <{other}>");
+                        ""
+                    }
+                };
+                if !key.is_empty() {
+                    self.sendkey(key);
+                }
+                rest = &tail[end + 1..];
+            } else {
+                self.type_plain(tail);
+                return;
+            }
+        }
+        self.type_plain(rest);
+    }
+
+    fn type_plain(&mut self, text: &str) {
         for ch in text.chars() {
             let key = match ch {
                 'a'..='z' | '0'..='9' => ch.to_string(),

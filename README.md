@@ -82,7 +82,8 @@ sync
 contents.) Then boot the target machine from USB (F12/F10/Esc boot menu,
 UEFI mode, Secure Boot disabled).
 
-In the chat: type and press Enter; **ESC** stops a running generation.
+In the chat: type and press Enter; **ESC** stops a running generation;
+**Up/Down** (and PgUp/PgDn) scroll the conversation history.
 Serial console (COM1 115200) carries debug logs.
 
 ## How it works

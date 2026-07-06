@@ -253,7 +253,7 @@ fn chat_loop(p: &mut Platform, surf: &mut nr_gfx::Surface) {
     turns.push(Turn {
         role: Role::System,
         text: alloc::format!(
-            "{} resident in RAM - fully local inference, no OS underneath. Type a prompt; ESC stops a running generation.",
+            "{} resident in RAM - fully local inference, no OS underneath. Type a prompt; ESC stops a generation; UP/DOWN scroll history.",
             p.model_name,
         ),
     });
@@ -261,6 +261,8 @@ fn chat_loop(p: &mut Platform, surf: &mut nr_gfx::Surface) {
     let mut frame = 0u32;
     let mut last_rate = 0u32;
     let mut conversation_started = false;
+    let mut scroll: usize = 0;
+    let page = nr_ui::chat::page_lines(surf, &p.fonts);
 
     loop {
         let mut dirty = false;
@@ -276,17 +278,22 @@ fn chat_loop(p: &mut Platform, surf: &mut nr_gfx::Surface) {
                         let prompt = core::mem::take(&mut inputline);
                         serial_println!("[chat] user: {}", prompt);
                         turns.push(Turn { role: Role::User, text: prompt.clone() });
+                        scroll = 0; // jump back to live view for the reply
                         last_rate = generate(p, surf, &prompt, &mut turns, &mut conversation_started, frame);
                     } else {
                         inputline.clear();
                     }
                 }
+                InputEvent::Up => scroll = scroll.saturating_add(3),
+                InputEvent::Down => scroll = scroll.saturating_sub(3),
+                InputEvent::PageUp => scroll = scroll.saturating_add(page),
+                InputEvent::PageDown => scroll = scroll.saturating_sub(page),
                 _ => {}
             }
         }
 
         if dirty || frame % 8 == 0 {
-            draw_chat(p, surf, &turns, &inputline, frame, last_rate, false);
+            scroll = draw_chat(p, surf, &turns, &inputline, frame, last_rate, false, scroll);
         }
         frame = frame.wrapping_add(1);
         stall_us(16_000);
@@ -331,7 +338,7 @@ fn generate(
         p.infer.forward(id);
         logits_ready = true;
         if i % 4 == 0 {
-            draw_chat(p, surf, turns, "", frame, 0, true);
+            draw_chat(p, surf, turns, "", frame, 0, true, 0);
             frame = frame.wrapping_add(1);
         }
         if p.infer.remaining() == 0 {
@@ -365,7 +372,7 @@ fn generate(
 
         produced += 1;
         rate = p.clock.rate_milli(produced, p.clock.now() - t0);
-        draw_chat(p, surf, turns, "", frame, rate, true);
+        draw_chat(p, surf, turns, "", frame, rate, true, 0);
         frame = frame.wrapping_add(1);
 
         if matches!(input::poll(), Some(InputEvent::Escape)) {
@@ -412,6 +419,7 @@ fn flush_utf8(pending: &mut Vec<u8>, out: &mut String) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_chat(
     p: &Platform,
     surf: &mut nr_gfx::Surface,
@@ -420,7 +428,8 @@ fn draw_chat(
     frame: u32,
     rate_milli: u32,
     generating: bool,
-) {
+    scroll: usize,
+) -> usize {
     let stats = Stats {
         model: &p.model_name,
         mem_used_mb: ((p.model.total_size() + p.arena.used()) / (1024 * 1024)) as u32,
@@ -433,7 +442,8 @@ fn draw_chat(
         generating,
     };
     let cursor_on = !generating && (frame / 16) % 2 == 0;
-    nr_ui::chat::draw(surf, &p.fonts, turns, input, cursor_on, &stats);
+    let scroll = nr_ui::chat::draw(surf, &p.fonts, turns, input, cursor_on, &stats, scroll);
     p.display.present(surf);
+    scroll
 }
 
