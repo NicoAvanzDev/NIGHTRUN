@@ -3,12 +3,16 @@ resolver = "2"
 members = [
     "crates/nr-boot",
     "crates/nr-gfx",
+    "crates/nr-runtime",
+    "crates/nr-tensor",
     "crates/nr-ui",
     "tools/xtask",
 ]
 # nr-boot only builds for x86_64-unknown-uefi; xtask drives that build.
 default-members = [
     "crates/nr-gfx",
+    "crates/nr-runtime",
+    "crates/nr-tensor",
     "crates/nr-ui",
     "tools/xtask",
 ]

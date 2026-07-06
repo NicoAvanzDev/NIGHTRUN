@@ -1,0 +1,13 @@
+[package]
+name = "nr-tensor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+# Host builds (tests, tools) get std; the UEFI build sets default-features = false.
+default = ["std"]
+std = []
+
+[dependencies]
+libm = "0.2"
