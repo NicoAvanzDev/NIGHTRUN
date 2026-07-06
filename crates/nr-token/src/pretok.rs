@@ -10,13 +10,23 @@
 //!
 //! Character classes use core's Unicode tables (`is_alphabetic`,
 //! `is_numeric`, `is_whitespace`); alternatives are tried in regex order.
+//!
+//! The Qwen2 family regex is identical except numbers match a single
+//! `\p{N}` (not `{1,3}`).
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Style {
+    Llama3,
+    Qwen2,
+}
 
 pub struct Chunks<'a> {
     rest: &'a str,
+    style: Style,
 }
 
-pub fn chunks(text: &str) -> Chunks<'_> {
-    Chunks { rest: text }
+pub fn chunks(text: &str, style: Style) -> Chunks<'_> {
+    Chunks { rest: text, style }
 }
 
 impl<'a> Iterator for Chunks<'a> {
@@ -26,7 +36,7 @@ impl<'a> Iterator for Chunks<'a> {
         if self.rest.is_empty() {
             return None;
         }
-        let len = match_one(self.rest);
+        let len = match_one(self.rest, self.style);
         let (chunk, rest) = self.rest.split_at(len);
         self.rest = rest;
         Some(chunk)
@@ -49,7 +59,7 @@ fn is_ws(c: char) -> bool {
 }
 
 /// Byte length of the chunk starting at the beginning of (non-empty) `s`.
-fn match_one(s: &str) -> usize {
+fn match_one(s: &str, style: Style) -> usize {
     let c0 = s.chars().next().unwrap();
     let b = s.as_bytes();
 
@@ -94,12 +104,16 @@ fn match_one(s: &str) -> usize {
         }
     }
 
-    // 3. \p{N}{1,3}
+    // 3. \p{N}{1,3} (llama3) / single \p{N} (qwen2)
     if is_num(c0) {
+        let max = match style {
+            Style::Llama3 => 3,
+            Style::Qwen2 => 1,
+        };
         let mut end = 0;
         let mut n = 0;
         for c in s.chars() {
-            if n < 3 && is_num(c) {
+            if n < max && is_num(c) {
                 end += c.len_utf8();
                 n += 1;
             } else {

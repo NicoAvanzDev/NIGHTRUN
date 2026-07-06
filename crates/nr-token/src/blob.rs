@@ -1,6 +1,7 @@
 //! Tokenizer blob layout (little-endian), embedded in .nrm:
 //!
-//!   magic "NRTK", u32 version = 1
+//!   magic "NRTK", u32 version = 2
+//!   u32 template (1 = llama3 header-style, 2 = chatml)
 //!   u32 vocab_count, u32 merge_count, u32 pool_size
 //!   u32 bos, eos, eot, start_header, end_header, end_of_text
 //!   [u32; 256]  byte -> token id
@@ -12,9 +13,18 @@
 use alloc::vec::Vec;
 
 pub const MAGIC: [u8; 4] = *b"NRTK";
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 
 pub const FLAG_CONTROL: u16 = 1;
+
+/// Chat template family baked into the blob by the converter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Template {
+    /// Llama-3 instruct: <|start_header_id|>role<|end_header_id|>\n\n ... <|eot_id|>
+    Llama3,
+    /// ChatML (Qwen): <|im_start|>role\n ... <|im_end|>\n  (no BOS)
+    ChatMl,
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct Specials {
@@ -28,6 +38,7 @@ pub struct Specials {
 
 pub struct Tokenizer<'a> {
     pub specials: Specials,
+    pub template: Template,
     vocab_count: u32,
     byte_ids: &'a [u8],   // 256 * u32
     table: &'a [u8],      // vocab_count * 8
@@ -58,18 +69,23 @@ impl<'a> Tokenizer<'a> {
         if u32le(blob, 4) != VERSION {
             return Err(Error::BadVersion);
         }
-        let vocab_count = u32le(blob, 8);
-        let merge_count = u32le(blob, 12) as usize;
-        let pool_size = u32le(blob, 16) as usize;
-        let specials = Specials {
-            bos: u32le(blob, 20),
-            eos: u32le(blob, 24),
-            eot: u32le(blob, 28),
-            start_header: u32le(blob, 32),
-            end_header: u32le(blob, 36),
-            end_of_text: u32le(blob, 40),
+        let template = match u32le(blob, 8) {
+            1 => Template::Llama3,
+            2 => Template::ChatMl,
+            _ => return Err(Error::BadVersion),
         };
-        let byte_ids_off = 44;
+        let vocab_count = u32le(blob, 12);
+        let merge_count = u32le(blob, 16) as usize;
+        let pool_size = u32le(blob, 20) as usize;
+        let specials = Specials {
+            bos: u32le(blob, 24),
+            eos: u32le(blob, 28),
+            eot: u32le(blob, 32),
+            start_header: u32le(blob, 36),
+            end_header: u32le(blob, 40),
+            end_of_text: u32le(blob, 44),
+        };
+        let byte_ids_off = 48;
         let table_off = byte_ids_off + 256 * 4;
         let merges_off = table_off + vocab_count as usize * 8;
         let pool_off = merges_off + merge_count * 16;
@@ -78,6 +94,7 @@ impl<'a> Tokenizer<'a> {
         }
         Ok(Tokenizer {
             specials,
+            template,
             vocab_count,
             byte_ids: &blob[byte_ids_off..table_off],
             table: &blob[table_off..merges_off],
@@ -169,7 +186,11 @@ impl<'a> Tokenizer<'a> {
 
     /// Encode plain text (no special tokens are ever produced).
     pub fn encode_text(&self, text: &str, out: &mut Vec<u32>) {
-        for chunk in crate::pretok::chunks(text) {
+        let style = match self.template {
+            Template::Llama3 => crate::pretok::Style::Llama3,
+            Template::ChatMl => crate::pretok::Style::Qwen2,
+        };
+        for chunk in crate::pretok::chunks(text, style) {
             self.encode_chunk(chunk.as_bytes(), out);
         }
     }

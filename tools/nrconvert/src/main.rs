@@ -8,7 +8,7 @@ mod tokenizer;
 use nr_model::crc32::Crc32;
 use nr_model::format::{self, TensorDtype, TensorKind};
 
-use crate::gguf::{Gguf, TensorInfo, GGML_F32, GGML_Q8_0};
+use crate::gguf::{Gguf, TensorInfo, GGML_F32, GGML_Q4_K, GGML_Q6_K, GGML_Q8_0};
 
 fn kv_u32(g: &Gguf, key: &str) -> u32 {
     g.kv.get(key).and_then(gguf::Value::as_u32).unwrap_or_else(|| panic!("missing {key}"))
@@ -16,6 +16,19 @@ fn kv_u32(g: &Gguf, key: &str) -> u32 {
 
 fn kv_f32(g: &Gguf, key: &str) -> f32 {
     g.kv.get(key).and_then(gguf::Value::as_f32).unwrap_or_else(|| panic!("missing {key}"))
+}
+
+/// Human label for the artifact's quantization recipe, from GGUF
+/// general.file_type (llama.cpp ftype enum).
+fn quant_label(g: &Gguf) -> &'static str {
+    match g.kv.get("general.file_type").and_then(gguf::Value::as_u32) {
+        Some(7) => "Q8_0",
+        Some(14) => "Q4_K_S",
+        Some(15) => "Q4_K_M",
+        Some(17) => "Q5_K_M",
+        Some(18) => "Q6_K",
+        _ => "quantized",
+    }
 }
 
 struct OutTensor<'a> {
@@ -94,21 +107,31 @@ fn main() {
     println!("parsing {input} ...");
     let g = gguf::parse(input);
     let arch = g.kv["general.architecture"].as_str().unwrap();
-    assert_eq!(arch, "llama", "expected a llama-architecture GGUF");
+    let (arch_id, family) = match arch {
+        "llama" => (1u32, tokenizer::Family::Llama3),
+        "qwen3" => (2u32, tokenizer::Family::Qwen3),
+        other => panic!("unsupported architecture {other} (expected llama or qwen3)"),
+    };
 
-    let dim = kv_u32(&g, "llama.embedding_length");
-    let n_layers = kv_u32(&g, "llama.block_count");
-    let n_heads = kv_u32(&g, "llama.attention.head_count");
-    let n_kv_heads = kv_u32(&g, "llama.attention.head_count_kv");
-    let ffn_dim = kv_u32(&g, "llama.feed_forward_length");
-    let ctx_train = kv_u32(&g, "llama.context_length");
-    let rope_theta = kv_f32(&g, "llama.rope.freq_base");
-    let norm_eps = kv_f32(&g, "llama.attention.layer_norm_rms_epsilon");
-    let head_dim = dim / n_heads;
+    let akey = |suffix: &str| format!("{arch}.{suffix}");
+    let dim = kv_u32(&g, &akey("embedding_length"));
+    let n_layers = kv_u32(&g, &akey("block_count"));
+    let n_heads = kv_u32(&g, &akey("attention.head_count"));
+    let n_kv_heads = kv_u32(&g, &akey("attention.head_count_kv"));
+    let ffn_dim = kv_u32(&g, &akey("feed_forward_length"));
+    let ctx_train = kv_u32(&g, &akey("context_length"));
+    let rope_theta = kv_f32(&g, &akey("rope.freq_base"));
+    let norm_eps = kv_f32(&g, &akey("attention.layer_norm_rms_epsilon"));
+    // Qwen3 declares an explicit head size (attention width != hidden dim).
+    let head_dim = g
+        .kv
+        .get(&akey("attention.key_length"))
+        .and_then(gguf::Value::as_u32)
+        .unwrap_or(dim / n_heads);
     let vocab = g.kv["tokenizer.ggml.tokens"].as_arr().unwrap().len() as u32;
 
     println!("building tokenizer blob ...");
-    let tok = tokenizer::build(&g);
+    let tok = tokenizer::build(&g, family);
     println!("  vocab={} merges={}", tok.vocab, tok.merges);
 
     // Collect tensors in inference-friendly order.
@@ -122,7 +145,12 @@ fn main() {
         let dtype = match t.dtype {
             GGML_F32 => TensorDtype::F32,
             GGML_Q8_0 => TensorDtype::Q8_0,
-            other => panic!("{}: unsupported dtype {other} (convert a Q8_0 GGUF)", t.name),
+            GGML_Q4_K => TensorDtype::Q4K,
+            GGML_Q6_K => TensorDtype::Q6K,
+            other => panic!(
+                "{}: unsupported dtype {other} (supported: F32, Q8_0, Q4_K, Q6_K)",
+                t.name
+            ),
         };
         let cols = t.dims[0] as u32;
         let rows = t.dims.get(1).copied().unwrap_or(1) as u32;
@@ -144,6 +172,11 @@ fn main() {
     for l in 0..n_layers as u16 {
         let n = |suffix: &str| format!("blk.{l}.{suffix}.weight");
         push(expect(&n("attn_norm")), TensorKind::AttnNorm, l);
+        if arch_id == 2 {
+            // Qwen3: per-head RMSNorm weights on Q and K (required).
+            push(expect(&n("attn_q_norm")), TensorKind::AttnQNorm, l);
+            push(expect(&n("attn_k_norm")), TensorKind::AttnKNorm, l);
+        }
         push(expect(&n("attn_q")), TensorKind::AttnQ, l);
         push(expect(&n("attn_k")), TensorKind::AttnK, l);
         push(expect(&n("attn_v")), TensorKind::AttnV, l);
@@ -220,6 +253,7 @@ fn main() {
     let mut header = Vec::with_capacity(format::HEADER_SIZE);
     header.extend_from_slice(&format::MAGIC);
     header.extend_from_slice(&format::VERSION.to_le_bytes());
+    header.extend_from_slice(&arch_id.to_le_bytes());
     for v in [dim, n_layers, n_heads, n_kv_heads, head_dim, ffn_dim, vocab, ctx_train] {
         header.extend_from_slice(&v.to_le_bytes());
     }
@@ -227,11 +261,12 @@ fn main() {
         header.extend_from_slice(&v.to_bits().to_le_bytes());
     }
     header.extend_from_slice(&flags.to_le_bytes());
-    let name = g
+    let base_name = g
         .kv
         .get("general.name")
         .and_then(gguf::Value::as_str)
         .unwrap_or("Unknown Model");
+    let name = format!("{base_name} {}", quant_label(&g));
     let mut name_bytes = [0u8; format::NAME_LEN];
     let n = name.len().min(format::NAME_LEN);
     name_bytes[..n].copy_from_slice(&name.as_bytes()[..n]);
@@ -279,7 +314,7 @@ fn main() {
     let mut ids = Vec::new();
     tk.encode_text("Hello, world!", &mut ids);
     println!(
-        "ok: {} MB, {} tensors, dim={} layers={} heads={}/{} ffn={} vocab={} tied={} ctx={}",
+        "ok ({name}): {} MB, {} tensors, dim={} layers={} heads={}/{} ffn={} vocab={} tied={} ctx={}",
         file.len() / (1024 * 1024),
         out.len(),
         model.meta.dim,

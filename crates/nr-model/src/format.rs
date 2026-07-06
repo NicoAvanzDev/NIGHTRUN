@@ -12,13 +12,38 @@
 use alloc::vec::Vec;
 
 pub const MAGIC: [u8; 4] = *b"NRUN";
-pub const VERSION: u32 = 1;
-pub const HEADER_SIZE: usize = 172;
+pub const VERSION: u32 = 2;
+pub const HEADER_SIZE: usize = 176;
 pub const NAME_LEN: usize = 48;
 pub const ENTRY_SIZE: usize = 32;
 pub const DATA_ALIGN: usize = 64;
 
 pub const FLAG_TIED_EMBEDDINGS: u32 = 1;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum Arch {
+    Llama3 = 1,
+    Qwen3 = 2,
+}
+
+impl Arch {
+    pub fn from_u32(v: u32) -> Option<Arch> {
+        match v {
+            1 => Some(Arch::Llama3),
+            2 => Some(Arch::Qwen3),
+            _ => None,
+        }
+    }
+
+    /// Chat display label for the assistant.
+    pub fn assistant_label(self) -> &'static str {
+        match self {
+            Arch::Llama3 => "llama",
+            Arch::Qwen3 => "qwen",
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u16)]
@@ -36,6 +61,8 @@ pub enum TensorKind {
     FfnGate = 16,
     FfnUp = 17,
     FfnDown = 18,
+    AttnQNorm = 19,
+    AttnKNorm = 20,
 }
 
 impl TensorKind {
@@ -55,6 +82,8 @@ impl TensorKind {
             16 => FfnGate,
             17 => FfnUp,
             18 => FfnDown,
+            19 => AttnQNorm,
+            20 => AttnKNorm,
             _ => return None,
         })
     }
@@ -65,10 +94,25 @@ impl TensorKind {
 pub enum TensorDtype {
     F32 = 0,
     Q8_0 = 1,
+    Q4K = 2,
+    Q6K = 3,
+}
+
+impl TensorDtype {
+    /// Bytes required for `n` elements (n must divide the block size).
+    pub fn byte_size(self, n: u64) -> Option<u64> {
+        match self {
+            TensorDtype::F32 => Some(n * 4),
+            TensorDtype::Q8_0 => (n % 32 == 0).then(|| n / 32 * 34),
+            TensorDtype::Q4K => (n % 256 == 0).then(|| n / 256 * 144),
+            TensorDtype::Q6K => (n % 256 == 0).then(|| n / 256 * 210),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct Meta {
+    pub arch: Arch,
     pub dim: u32,
     pub n_layers: u32,
     pub n_heads: u32,
@@ -129,6 +173,16 @@ impl<'a> TensorView<'a> {
         assert_eq!(self.dtype, TensorDtype::Q8_0);
         nr_tensor::q8::cast_blocks(self.bytes)
     }
+
+    pub fn q4k(&self) -> &'a [nr_tensor::kquant::BlockQ4K] {
+        assert_eq!(self.dtype, TensorDtype::Q4K);
+        nr_tensor::kquant::cast_q4k(self.bytes)
+    }
+
+    pub fn q6k(&self) -> &'a [nr_tensor::kquant::BlockQ6K] {
+        assert_eq!(self.dtype, TensorDtype::Q6K);
+        nr_tensor::kquant::cast_q6k(self.bytes)
+    }
 }
 
 #[derive(Debug)]
@@ -186,7 +240,9 @@ impl<'a> Model<'a> {
         if version != VERSION {
             return Err(ParseError::BadVersion(version));
         }
+        let arch = Arch::from_u32(c.u32()).ok_or(ParseError::BadTable)?;
         let meta = Meta {
+            arch,
             dim: c.u32(),
             n_layers: c.u32(),
             n_heads: c.u32(),
@@ -245,6 +301,8 @@ impl<'a> Model<'a> {
             let dtype = match tc.u16() {
                 0 => TensorDtype::F32,
                 1 => TensorDtype::Q8_0,
+                2 => TensorDtype::Q4K,
+                3 => TensorDtype::Q6K,
                 _ => return Err(ParseError::BadTable),
             };
             let _pad = tc.u16();
@@ -253,6 +311,12 @@ impl<'a> Model<'a> {
             let rows = tc.u32();
             let cols = tc.u32();
             if offset as usize + size as usize > data_size {
+                return Err(ParseError::BadTable);
+            }
+            // Size must agree exactly with dtype block math (catches
+            // malformed payloads and non-block-aligned dimensions).
+            let n = rows as u64 * cols as u64;
+            if dtype.byte_size(n) != Some(size) {
                 return Err(ParseError::BadTable);
             }
             entries.push(TensorEntry { kind, layer, dtype, offset, size, rows, cols });
@@ -322,5 +386,7 @@ fn kind_name(kind: TensorKind) -> &'static str {
         FfnGate => "ffn_gate",
         FfnUp => "ffn_up",
         FfnDown => "ffn_down",
+        AttnQNorm => "attn_q_norm",
+        AttnKNorm => "attn_k_norm",
     }
 }

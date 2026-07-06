@@ -8,12 +8,12 @@ use std::io::{Read, Seek, SeekFrom};
 fn read_tokenizer_blob() -> Option<Vec<u8>> {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
     let mut f = std::fs::File::open(format!("{root}/models/model.nrm")).ok()?;
-    // Header: tok_off u64 at 116, tok_size u64 at 124 (see nr-model::format).
-    let mut header = [0u8; 172];
+    // Header: tok_off u64 at 120, tok_size u64 at 128 (see nr-model::format v2).
+    let mut header = [0u8; 176];
     f.read_exact(&mut header).ok()?;
     assert_eq!(&header[0..4], b"NRUN");
-    let tok_off = u64::from_le_bytes(header[116..124].try_into().unwrap());
-    let tok_size = u64::from_le_bytes(header[124..132].try_into().unwrap());
+    let tok_off = u64::from_le_bytes(header[120..128].try_into().unwrap());
+    let tok_size = u64::from_le_bytes(header[128..136].try_into().unwrap());
     let mut blob = vec![0u8; tok_size as usize];
     f.seek(SeekFrom::Start(tok_off)).ok()?;
     f.read_exact(&mut blob).ok()?;

@@ -212,7 +212,8 @@ fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx
     ui.show(5, 1000, &alloc::format!("boot sequence {}.{}s", boot_ms / 1000, boot_ms % 1000 / 100));
     stall_us(400_000);
 
-    let model_name = alloc::format!("{} Q8_0", model.meta.name_str());
+    // The converter writes the full display name incl. quant label.
+    let model_name = alloc::format!("{}", model.meta.name_str());
     Platform {
         display,
         fonts,

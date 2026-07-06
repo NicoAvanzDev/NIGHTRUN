@@ -35,7 +35,14 @@ pub struct BuiltTokenizer {
     pub merges: usize,
 }
 
-pub fn build(gguf: &Gguf) -> BuiltTokenizer {
+/// Template/family selector, written into the blob header.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Family {
+    Llama3,
+    Qwen3,
+}
+
+pub fn build(gguf: &Gguf, family: Family) -> BuiltTokenizer {
     let model = gguf.kv["tokenizer.ggml.model"].as_str().expect("tokenizer model");
     assert_eq!(model, "gpt2", "expected byte-level BPE (gpt2-style) tokenizer");
 
@@ -50,8 +57,24 @@ pub fn build(gguf: &Gguf) -> BuiltTokenizer {
         })
         .collect();
     let merges = gguf.kv["tokenizer.ggml.merges"].as_arr().expect("merges");
-    let bos = gguf.kv["tokenizer.ggml.bos_token_id"].as_u32().expect("bos id");
     let eos = gguf.kv["tokenizer.ggml.eos_token_id"].as_u32().expect("eos id");
+    // Qwen has no BOS (its template never emits one); fall back to eos so
+    // the slot holds a valid id either way.
+    let bos = gguf
+        .kv
+        .get("tokenizer.ggml.bos_token_id")
+        .and_then(Value::as_u32)
+        .unwrap_or(eos);
+
+    // Hard check: the GGUF's pretokenizer id must match the family we're
+    // baking in, or runtime tokenization would silently diverge.
+    if let Some(pre) = gguf.kv.get("tokenizer.ggml.pre").and_then(Value::as_str) {
+        let expect = match family {
+            Family::Llama3 => "llama-bpe",
+            Family::Qwen3 => "qwen2",
+        };
+        assert_eq!(pre, expect, "pretokenizer mismatch: gguf says {pre:?}, family expects {expect:?}");
+    }
 
     let u2b = unicode_to_byte();
     let decode = |s: &str, control: bool| -> Vec<u8> {
@@ -125,10 +148,24 @@ pub fn build(gguf: &Gguf) -> BuiltTokenizer {
     let lookup_literal = |s: &str| -> u32 {
         *raw_by_literal.get(s).unwrap_or_else(|| panic!("vocab missing {s}"))
     };
-    let eot = lookup_literal("<|eot_id|>");
-    let start_header = lookup_literal("<|start_header_id|>");
-    let end_header = lookup_literal("<|end_header_id|>");
-    let end_of_text = lookup_literal("<|end_of_text|>");
+    // Generic special slots (see nr-token::blob): for chatml, <|im_start|>
+    // fills start_header and <|im_end|> fills eot; end_header is unused.
+    let (template_id, eot, start_header, end_header, end_of_text) = match family {
+        Family::Llama3 => (
+            1u32,
+            lookup_literal("<|eot_id|>"),
+            lookup_literal("<|start_header_id|>"),
+            lookup_literal("<|end_header_id|>"),
+            lookup_literal("<|end_of_text|>"),
+        ),
+        Family::Qwen3 => (
+            2u32,
+            lookup_literal("<|im_end|>"),
+            lookup_literal("<|im_start|>"),
+            lookup_literal("<|im_end|>"),
+            lookup_literal("<|endoftext|>"),
+        ),
+    };
 
     // Serialize.
     let mut pool: Vec<u8> = Vec::new();
@@ -144,6 +181,7 @@ pub fn build(gguf: &Gguf) -> BuiltTokenizer {
     let mut blob = Vec::new();
     blob.extend_from_slice(&nr_token::blob::MAGIC);
     blob.extend_from_slice(&nr_token::blob::VERSION.to_le_bytes());
+    blob.extend_from_slice(&template_id.to_le_bytes());
     blob.extend_from_slice(&(decoded.len() as u32).to_le_bytes());
     blob.extend_from_slice(&(resolved.len() as u32).to_le_bytes());
     blob.extend_from_slice(&(pool.len() as u32).to_le_bytes());
