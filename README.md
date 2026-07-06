@@ -1,10 +1,11 @@
 # NightRun
 
 **A bare-metal x86_64 LLM appliance.** NightRun boots straight from a USB
-stick into a synthwave chat terminal and runs **Llama 3.2 1B Instruct**
-entirely on the CPU — no Linux, no GRUB, no operating system underneath.
-Everything on screen (boot splash, loading sequence, chat UI, inference,
-tokenizer) is our own Rust code running as a single UEFI application.
+stick into a synthwave chat terminal and runs **Qwen3-4B-Instruct-2507
+(Q4_K_M)** or **Llama 3.2 1B Instruct (Q8_0)** entirely on the CPU — no
+Linux, no GRUB, no operating system underneath. Everything on screen
+(boot splash, loading sequence, chat UI, inference, tokenizer) is our own
+Rust code running as a single UEFI application.
 
 ![NightRun splash](docs/media/splash.png)
 ![NightRun chat](docs/media/chat-done.png)
@@ -17,14 +18,16 @@ tokenizer) is our own Rust code running as a single UEFI application.
 3. The model (~1.26 GB, Q8_0) is loaded **fully into RAM** and CRC-verified.
 4. You get a `user:` / `llama:` chat with live tokens/sec — fully offline.
 
-Measured in QEMU (8 cores, KVM): **~22 tok/s generation, ~23 tok/s prompt
-processing**, chat-ready in ~9 s after the splash. See
+Measured in QEMU (8 cores, KVM): Llama 1B **~15-22 tok/s**, Qwen3 4B
+**~9-12 tok/s** generation; chat-ready in ~8/~21 s after the splash. Both
+models are token-for-token greedy-parity-tested against llama.cpp. See
 [docs/benchmarks.md](docs/benchmarks.md).
 
 ## Hardware requirements
 
 - x86_64 machine with **UEFI** firmware (USB boot enabled, Secure Boot off)
-- **8 GB RAM recommended** (4 GB minimum)
+- **8 GB RAM recommended** (4 GB minimum for the Llama 1B image; Qwen3 4B
+  needs ~3.5 GB for model + KV cache alone)
 - AVX2-capable CPU strongly recommended (Intel Haswell+/AMD Zen+; scalar
   fallback exists but is slow)
 - USB keyboard, any GOP-capable display
@@ -40,30 +43,43 @@ cargo xtask build          # builds BOOTX64.EFI (custom hard-float UEFI target)
 cargo test                 # host test suite (kernels, tokenizer, parity)
 ```
 
-## Get and convert the model
+## Get and convert a model
 
-NightRun runs Llama 3.2 1B Instruct in **Q8_0** GGUF form, converted to its
-own `.nrm` runtime format. Llama 3.2 is distributed under the
-[Llama 3.2 Community License](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct)
-— review and accept it. A ready-made Q8_0 GGUF (e.g.
-`bartowski/Llama-3.2-1B-Instruct-GGUF`) works directly:
+NightRun converts GGUF artifacts into its own `.nrm` runtime format and
+supports two model families: **Qwen3** (Apache-2.0; recommended) and
+**Llama 3.2** (Llama Community License — review and accept it).
+Supported tensor formats: Q8_0, Q4_K, Q6_K, F32 — a Q4_K_M or Q8_0 GGUF
+converts as-is, preserving each tensor's exact quantization.
 
 ```sh
 mkdir -p models
+# Qwen3-4B-Instruct-2507 Q4_K_M (~2.4 GB) - the recommended model
+curl -L -o models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf \
+  https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+cargo run --release -p nrconvert -- \
+  models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf models/qwen3-4b-q4km.nrm
+
+# Llama 3.2 1B Instruct Q8_0 (~1.3 GB) - smaller and faster
 curl -L -o models/Llama-3.2-1B-Instruct-Q8_0.gguf \
   https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q8_0.gguf
 cargo run --release -p nrconvert -- \
   models/Llama-3.2-1B-Instruct-Q8_0.gguf models/model.nrm
 ```
 
-The converter validates its own output (parses it back, re-checksums, and
-smoke-tests the tokenizer).
+The converter validates its own output (parses it back, re-checksums,
+smoke-tests the tokenizer); `nrconvert --inspect file.gguf` dumps a
+GGUF's per-tensor dtype table.
 
 ## Build the bootable image and run it
 
 ```sh
-cargo xtask image                     # -> nightrun.img (GPT + FAT32 ESP)
-cargo xtask run --img --mem 4G --window   # boot it in QEMU + OVMF
+# Qwen3 4B (recommended; give the guest 6 GB)
+cargo xtask image --model models/qwen3-4b-q4km.nrm
+cargo xtask run --img --model models/qwen3-4b-q4km.nrm --mem 6G --window
+
+# or Llama 1B
+cargo xtask image                     # default: models/model.nrm
+cargo xtask run --img --mem 4G --window
 ```
 
 Useful `cargo xtask run` flags: `--window` (show display), `--mem`, `--smp`,

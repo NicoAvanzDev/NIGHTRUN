@@ -24,7 +24,8 @@ fn main() {
             build_and_stage();
         }
         Some("image") => {
-            build_image(true);
+            let model = args.iter().position(|a| a == "--model").map(|i| args[i + 1].clone());
+            build_image(true, model.as_deref());
         }
         Some("run") => run(parse_run_opts(&args[1..])),
         Some("bench") => bench(),
@@ -80,22 +81,37 @@ fn bench() {
     println!("--- wrote docs/benchmarks.md:\n{out}");
 }
 
-/// Build nightrun.img. When `fresh` (or no image exists) the whole image is
-/// rebuilt with the model; otherwise only BOOTX64.EFI is refreshed.
-fn build_image(fresh: bool) -> PathBuf {
+/// Build nightrun.img with the given model (default models/model.nrm).
+/// When `fresh` is false and the image already contains this exact model,
+/// only BOOTX64.EFI is refreshed.
+fn build_image(fresh: bool, model_arg: Option<&str>) -> PathBuf {
     let root = root();
     let (_, efi) = build_and_stage();
     let img = root.join("nightrun.img");
-    if !fresh && img.exists() && image::update_efi(&img, &efi) {
+    let model = root.join(model_arg.unwrap_or("models/model.nrm"));
+    let model = model.exists().then_some(model);
+    if model.is_none() {
+        println!("note: model file missing - building image without model");
+    }
+
+    // Sidecar records which model the image holds, so switching models
+    // forces a full rebuild instead of a stale EFI-only update.
+    let sidecar = root.join("target/image-model.txt");
+    let stamp = model
+        .as_ref()
+        .map(|m| {
+            let sz = std::fs::metadata(m).map(|md| md.len()).unwrap_or(0);
+            format!("{}|{sz}", m.display())
+        })
+        .unwrap_or_default();
+    let same_model = std::fs::read_to_string(&sidecar).map(|s| s == stamp).unwrap_or(false);
+
+    if !fresh && same_model && img.exists() && image::update_efi(&img, &efi) {
         println!("updated BOOTX64.EFI in {}", img.display());
         return img;
     }
-    let model = root.join("models/model.nrm");
-    let model = model.exists().then_some(model);
-    if model.is_none() {
-        println!("note: models/model.nrm missing - building image without model");
-    }
     image::build(&img, &efi, model.as_deref());
+    let _ = std::fs::write(&sidecar, stamp);
     img
 }
 
@@ -139,6 +155,7 @@ fn build_and_stage() -> (PathBuf, PathBuf) {
 struct RunOpts {
     window: bool,
     img: bool,
+    model: Option<String>,
     mem: Option<String>,
     smp: Option<String>,
     secs: Option<u64>,
@@ -154,6 +171,7 @@ fn parse_run_opts(args: &[String]) -> RunOpts {
         match a.as_str() {
             "--window" => o.window = true,
             "--img" => o.img = true,
+            "--model" => o.model = Some(val()),
             "--mem" => o.mem = Some(val()),
             "--smp" => o.smp = Some(val()),
             "--secs" => o.secs = Some(val().parse().unwrap()),
@@ -179,7 +197,7 @@ fn run(opts: RunOpts) {
     // exceeds QEMU's virtual-FAT limits); the default boots the staged ESP
     // directory for a fast dev loop.
     let boot_drive = if opts.img {
-        let img = build_image(false);
+        let img = build_image(false, opts.model.as_deref());
         format!("format=raw,file={}", img.display())
     } else {
         let (esp, _) = build_and_stage();

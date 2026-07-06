@@ -1,7 +1,20 @@
 //! Load model.nrm from the boot volume into RAM (firmware pages that stay
 //! resident for the whole session).
 
+use core::sync::atomic::{AtomicBool, Ordering};
+
 use uefi::boot::{self, AllocateType, MemoryType};
+
+/// Set once the model is resident: any further attempt to read model data
+/// from storage is a hard fault. This enforces the RAM-residency contract
+/// structurally.
+static STORAGE_SEALED: AtomicBool = AtomicBool::new(false);
+
+/// Seal storage after the model is resident in RAM.
+pub fn seal_storage() {
+    STORAGE_SEALED.store(true, Ordering::SeqCst);
+    crate::serial_println!("[boot] storage sealed - model reads from disk are now forbidden");
+}
 use uefi::proto::media::file::{File, FileAttribute, FileInfo, FileMode};
 use uefi::CString16;
 
@@ -19,6 +32,10 @@ const CHUNK: usize = 16 * 1024 * 1024;
 /// Reads `\model.nrm` from the volume NightRun booted from, reporting
 /// (bytes_done, bytes_total) after each chunk.
 pub fn load(progress: &mut dyn FnMut(usize, usize)) -> Result<&'static mut [u8], LoadError> {
+    assert!(
+        !STORAGE_SEALED.load(Ordering::SeqCst),
+        "model storage is sealed: no reads after RAM residency"
+    );
     let mut fs = boot::get_image_file_system(boot::image_handle())
         .map_err(|e| LoadError::Fs(e.status()))?;
     let mut root = fs.open_volume().map_err(|e| LoadError::Fs(e.status()))?;

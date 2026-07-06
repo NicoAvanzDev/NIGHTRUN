@@ -16,11 +16,12 @@ pub enum Role {
 }
 
 impl Role {
-    pub fn prefix(&self) -> &'static str {
+    /// Prefix text; the assistant's name comes from the model family.
+    pub fn prefix_len(&self, assistant: &str) -> usize {
         match self {
-            Role::User => "user: ",
-            Role::Llama => "llama: ",
-            Role::System => "",
+            Role::User => "user: ".len(),
+            Role::Llama => assistant.len() + 2,
+            Role::System => 0,
         }
     }
 
@@ -40,6 +41,8 @@ pub struct Turn {
 
 pub struct Stats<'a> {
     pub model: &'a str,
+    /// Assistant display name ("llama", "qwen").
+    pub assistant: &'a str,
     pub mem_used_mb: u32,
     pub mem_total_mb: u32,
     /// Generation rate, milli-tokens per second; 0 hides the readout.
@@ -71,7 +74,7 @@ pub fn draw(
     surf.clear(theme::BG_DEEP);
     status_bar(surf, fonts, stats);
     input_bar(surf, fonts, input, cursor_on, stats.generating);
-    let scroll = scrollback(surf, fonts, turns, stats.generating, scroll);
+    let scroll = scrollback(surf, fonts, turns, stats.generating, scroll, stats.assistant);
     draw::scanlines(surf, 26);
     scroll
 }
@@ -163,7 +166,14 @@ fn input_bar(surf: &mut Surface, fonts: &Fonts, input: &str, cursor_on: bool, ge
     }
 }
 
-fn scrollback(surf: &mut Surface, fonts: &Fonts, turns: &[Turn], generating: bool, scroll: usize) -> usize {
+fn scrollback(
+    surf: &mut Surface,
+    fonts: &Fonts,
+    turns: &[Turn],
+    generating: bool,
+    scroll: usize,
+    assistant: &str,
+) -> usize {
     let f = &fonts.body;
     let w = surf.width as i32;
     let h = surf.height as i32;
@@ -177,14 +187,22 @@ fn scrollback(surf: &mut Surface, fonts: &Fonts, turns: &[Turn], generating: boo
         if i > 0 {
             lines.push((0, 0, String::new())); // blank separator
         }
-        let prefix = turn.role.prefix();
+        let prefix = match turn.role {
+            Role::User => String::from("user: "),
+            Role::Llama => {
+                let mut p = String::from(assistant);
+                p.push_str(": ");
+                p
+            }
+            Role::System => String::new(),
+        };
         let indent = prefix.chars().count();
         let body_cols = cols.saturating_sub(indent).max(8);
         let streaming_tail = generating && i == turns.len() - 1 && turn.role == Role::Llama;
         let mut first = true;
         for line in wrap(&turn.text, body_cols, streaming_tail) {
             if first {
-                let mut s = String::from(prefix);
+                let mut s = prefix.clone();
                 s.push_str(&line);
                 lines.push((turn.role.color(), 0, s));
                 first = false;
@@ -209,7 +227,10 @@ fn scrollback(surf: &mut Surface, fonts: &Fonts, turns: &[Turn], generating: boo
     for (color, indent, line) in &lines[start..end] {
         if !line.is_empty() {
             // Prefix in role color, continuation text in primary.
-            let has_prefix = *indent == 0 && (line.starts_with("user:") || line.starts_with("llama:"));
+            let mut assistant_prefix = String::from(assistant);
+            assistant_prefix.push(':');
+            let has_prefix =
+                *indent == 0 && (line.starts_with("user:") || line.starts_with(&assistant_prefix));
             if has_prefix {
                 let split = line.find(' ').map(|i| i + 1).unwrap_or(line.len());
                 let (pre, rest) = line.split_at(split);

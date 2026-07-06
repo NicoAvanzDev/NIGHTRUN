@@ -17,13 +17,17 @@ use uefi::boot::{AllocateType, MemoryType};
 use crate::input::{self, InputEvent};
 use crate::video::Display;
 
-const ARENA_MB: usize = 256;
 const CTX_LEN: usize = 4096;
 const MAX_GEN_TOKENS: usize = 768;
-const SYSTEM_PROMPT: &str = "You are NightRun, a helpful assistant running Llama 3.2 fully offline on bare-metal x86_64 hardware - no operating system underneath. Be concise and friendly.";
 
 fn stall_us(us: u64) {
     boot::stall(Duration::from_micros(us));
+}
+
+fn system_prompt(model_name: &str) -> String {
+    alloc::format!(
+        "You are NightRun, a helpful assistant running {model_name} fully offline on bare-metal x86_64 hardware - no operating system underneath. Be concise and friendly."
+    )
 }
 
 pub struct Platform {
@@ -39,6 +43,7 @@ pub struct Platform {
     pub sampler: Sampler,
     pub cores: u32,
     pub pp_milli: u32,
+    pub assistant: &'static str,
 }
 
 pub fn run(display: Display) {
@@ -173,20 +178,25 @@ fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx
         model.meta.n_layers
     );
 
-    // Stage 4: arena + inference context (KV cache, scratch buffers).
-    let need = InferCtx::required_bytes(&model, CTX_LEN);
-    assert!(need < ARENA_MB * 1024 * 1024, "arena too small for ctx");
-    let pages = ARENA_MB * 1024 * 1024 / 4096;
+    // Model is fully resident; nothing may touch storage from here on.
+    crate::modelload::seal_storage();
+
+    // Stage 4: arena + inference context, sized for this model's KV cache
+    // and scratch at CTX_LEN (Llama 1B: ~140 MB, Qwen3 4B: ~640 MB).
+    let need = InferCtx::required_bytes(&model, CTX_LEN) + 8 * 1024 * 1024;
+    let arena_bytes = need.div_ceil(4096) * 4096;
+    let pages = arena_bytes / 4096;
     let base = match boot::allocate_pages(AllocateType::AnyPages, MemoryType::LOADER_DATA, pages) {
         Ok(b) => b,
         Err(_) => ui.fail("arena allocation failed - machine needs more RAM"),
     };
     // SAFETY: freshly allocated, exclusively owned.
-    let mut arena = unsafe { Arena::new(base.as_ptr(), pages * 4096) };
-    for off in (0..pages * 4096).step_by(16 * 1024 * 1024) {
-        let len = (16 * 1024 * 1024).min(pages * 4096 - off);
+    let mut arena = unsafe { Arena::new(base.as_ptr(), arena_bytes) };
+    let arena_mb = arena_bytes / (1024 * 1024);
+    for off in (0..arena_bytes).step_by(16 * 1024 * 1024) {
+        let len = (16 * 1024 * 1024).min(arena_bytes - off);
         unsafe { core::ptr::write_bytes(base.as_ptr().add(off), 0, len) };
-        ui.show(4, ((off + len) * 500 / (pages * 4096)) as u32, &alloc::format!("{ARENA_MB} MB resident arena"));
+        ui.show(4, ((off + len) * 500 / arena_bytes) as u32, &alloc::format!("{arena_mb} MB resident arena"));
     }
 
     // The model must outlive the InferCtx that borrows it; both live for
@@ -227,6 +237,7 @@ fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx
         sampler,
         cores: workers as u32 + 1,
         pp_milli: 0,
+        assistant: model.meta.arch.assistant_label(),
     }
 }
 
@@ -324,7 +335,7 @@ fn generate(
     // Build this turn's token sequence (Llama-3 instruct template).
     let mut ids: Vec<u32> = Vec::new();
     if !*conversation_started {
-        p.tokenizer.encode_conversation_start(Some(SYSTEM_PROMPT), &mut ids);
+        p.tokenizer.encode_conversation_start(Some(&system_prompt(&p.model_name)), &mut ids);
         *conversation_started = true;
     }
     p.tokenizer.encode_message(nr_token::template::ROLE_USER, prompt, &mut ids);
@@ -433,6 +444,7 @@ fn draw_chat(
 ) -> usize {
     let stats = Stats {
         model: &p.model_name,
+        assistant: p.assistant,
         mem_used_mb: ((p.model.total_size() + p.arena.used()) / (1024 * 1024)) as u32,
         mem_total_mb: p.ram_mb,
         tok_s_milli: rate_milli,
