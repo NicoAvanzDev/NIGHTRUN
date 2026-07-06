@@ -33,17 +33,32 @@ pub fn rope_freqs(out: &mut [f32], head_dim: usize, theta: f32, scaling: Option<
     }
 }
 
+/// Pairing convention for the rotation.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum RopeStyle {
+    /// Adjacent pairs (x[2i], x[2i+1]) — llama-family GGUFs (converter
+    /// permutes Q/K weights into this layout).
+    Adjacent,
+    /// Half-split pairs (x[i], x[i+d/2]) — NEOX convention, used by Qwen3.
+    Neox,
+}
+
 /// Rotate `x` (one or more heads laid out contiguously) in place for
 /// position `pos`. `freqs` holds head_dim/2 base frequencies.
-pub fn apply(x: &mut [f32], head_dim: usize, freqs: &[f32], pos: usize) {
+pub fn apply(x: &mut [f32], head_dim: usize, freqs: &[f32], pos: usize, style: RopeStyle) {
+    let half = head_dim / 2;
     for head in x.chunks_exact_mut(head_dim) {
-        for i in 0..head_dim / 2 {
+        for i in 0..half {
             let angle = pos as f32 * freqs[i];
             let (sin, cos) = libm::sincosf(angle);
-            let a = head[2 * i];
-            let b = head[2 * i + 1];
-            head[2 * i] = a * cos - b * sin;
-            head[2 * i + 1] = a * sin + b * cos;
+            let (ia, ib) = match style {
+                RopeStyle::Adjacent => (2 * i, 2 * i + 1),
+                RopeStyle::Neox => (i, i + half),
+            };
+            let a = head[ia];
+            let b = head[ib];
+            head[ia] = a * cos - b * sin;
+            head[ib] = a * sin + b * cos;
         }
     }
 }

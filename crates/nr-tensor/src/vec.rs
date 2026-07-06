@@ -13,6 +13,19 @@ pub fn rmsnorm(out: &mut [f32], x: &[f32], weight: &[f32], eps: f32) {
     }
 }
 
+/// In-place RMSNorm: x = x * rsqrt(mean(x^2) + eps) * weight.
+pub fn rmsnorm_inplace(x: &mut [f32], weight: &[f32], eps: f32) {
+    let n = x.len();
+    let mut ss = 0f32;
+    for &v in x.iter() {
+        ss += v * v;
+    }
+    let scale = 1.0 / libm::sqrtf(ss / n as f32 + eps);
+    for (v, &w) in x.iter_mut().zip(weight) {
+        *v *= scale * w;
+    }
+}
+
 /// In-place numerically-stable softmax.
 pub fn softmax(x: &mut [f32]) {
     let max = x.iter().fold(f32::NEG_INFINITY, |m, &v| m.max(v));

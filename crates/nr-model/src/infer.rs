@@ -1,37 +1,67 @@
-//! Llama forward pass over .nrm weights: RMSNorm -> GQA attention with
-//! rotary embeddings and an f16 KV cache -> SwiGLU MLP, Q8_0 quantized
-//! matvecs throughout. Single token per step; all buffers preallocated.
+//! Llama-family forward pass over .nrm weights: RMSNorm -> GQA attention
+//! with rotary embeddings and an f16 KV cache -> SwiGLU MLP, quantized
+//! matvecs throughout. Supports the Llama-3 recipe and the Qwen3 variant
+//! (per-head Q/K RMSNorm, attention width != hidden width).
+//!
+//! Weight matrices are dtype-tagged (Q8_0 / Q4_K / Q6_K); dispatch happens
+//! once per matvec call, never inside row loops. Activations are quantized
+//! to the matching format (Q8_0 or Q8_K). Single token per step; all
+//! buffers preallocated — generation never allocates.
 
 use nr_tensor::kernels::{axpy_f16, dot_f16, matvec_q8};
+use nr_tensor::kquant::{self, BlockQ4K, BlockQ6K, BlockQ8K, QK_K};
 use nr_tensor::q8::{self, BlockQ8_0, QK8_0};
 use nr_tensor::{f32_to_f16, rope, vec as tvec};
 
-use crate::format::{Model, ParseError, TensorKind, TensorView};
+use crate::format::{Arch, Model, ParseError, TensorDtype, TensorKind, TensorView};
 
-pub struct LayerWeights<'m> {
-    pub attn_norm: &'m [f32],
-    pub wq: &'m [BlockQ8_0],
-    pub wk: &'m [BlockQ8_0],
-    pub wv: &'m [BlockQ8_0],
-    pub wo: &'m [BlockQ8_0],
-    pub ffn_norm: &'m [f32],
-    pub w_gate: &'m [BlockQ8_0],
-    pub w_up: &'m [BlockQ8_0],
-    pub w_down: &'m [BlockQ8_0],
+/// A dtype-tagged weight matrix (rows x cols), viewed in place.
+#[derive(Clone, Copy)]
+pub enum QMat<'m> {
+    Q8(&'m [BlockQ8_0]),
+    Q4K(&'m [BlockQ4K]),
+    Q6K(&'m [BlockQ6K]),
 }
 
-pub struct Weights<'m> {
-    pub embed: &'m [BlockQ8_0],
-    pub layers: alloc::vec::Vec<LayerWeights<'m>>,
-    pub out_norm: &'m [f32],
-    /// Classifier; equals `embed` for tied models.
-    pub output: &'m [BlockQ8_0],
+impl<'m> QMat<'m> {
+    fn from_view(v: TensorView<'m>) -> Result<QMat<'m>, ParseError> {
+        Ok(match v.dtype {
+            TensorDtype::Q8_0 => QMat::Q8(v.q8()),
+            TensorDtype::Q4K => QMat::Q4K(v.q4k()),
+            TensorDtype::Q6K => QMat::Q6K(v.q6k()),
+            TensorDtype::F32 => return Err(ParseError::BadTable),
+        })
+    }
+
+    /// Dequantize row `r` (cols values) into `out`.
+    fn dequant_row(&self, r: usize, cols: usize, out: &mut [f32]) {
+        match self {
+            QMat::Q8(blocks) => {
+                let bpr = cols / QK8_0;
+                q8::dequantize(&blocks[r * bpr..(r + 1) * bpr], out);
+            }
+            QMat::Q4K(blocks) => {
+                let bpr = cols / QK_K;
+                for (i, b) in blocks[r * bpr..(r + 1) * bpr].iter().enumerate() {
+                    kquant::dequant_q4k(b, &mut out[i * QK_K..(i + 1) * QK_K]);
+                }
+            }
+            QMat::Q6K(blocks) => {
+                let bpr = cols / QK_K;
+                for (i, b) in blocks[r * bpr..(r + 1) * bpr].iter().enumerate() {
+                    kquant::dequant_q6k(b, &mut out[i * QK_K..(i + 1) * QK_K]);
+                }
+            }
+        }
+    }
 }
 
 /// Dimensions captured as plain usizes.
 #[derive(Clone, Copy)]
 pub struct Dims {
     pub dim: usize,
+    /// n_heads * head_dim; equals `dim` for Llama, differs for Qwen3.
+    pub att_dim: usize,
     pub n_layers: usize,
     pub n_heads: usize,
     pub n_kv_heads: usize,
@@ -42,24 +72,113 @@ pub struct Dims {
     pub ctx: usize,
 }
 
+pub struct LayerWeights<'m> {
+    pub attn_norm: &'m [f32],
+    /// Per-head RMSNorm weights (head_dim each); Qwen3 only.
+    pub q_norm: Option<&'m [f32]>,
+    pub k_norm: Option<&'m [f32]>,
+    pub wq: QMat<'m>,
+    pub wk: QMat<'m>,
+    pub wv: QMat<'m>,
+    pub wo: QMat<'m>,
+    pub ffn_norm: &'m [f32],
+    pub w_gate: QMat<'m>,
+    pub w_up: QMat<'m>,
+    pub w_down: QMat<'m>,
+}
+
+pub struct Weights<'m> {
+    pub embed: QMat<'m>,
+    pub layers: alloc::vec::Vec<LayerWeights<'m>>,
+    pub out_norm: &'m [f32],
+    /// Classifier; equals `embed` for tied models.
+    pub output: QMat<'m>,
+}
+
+/// Scratch activation-quantization buffers; a matvec input is quantized
+/// into the format its weight matrix needs.
+struct Acts {
+    q8: &'static mut [BlockQ8_0],
+    q8k: &'static mut [BlockQ8K],
+}
+
+impl Acts {
+    /// Quantize `x` and run `w.matvec` into y (rows = y.len(), cols = x.len()).
+    fn matvec(&mut self, y: &mut [f32], w: QMat, x: &[f32]) {
+        let cols = x.len();
+        let rows = y.len();
+        match w {
+            QMat::Q8(blocks) => {
+                let xq = &mut self.q8[..cols / QK8_0];
+                q8::quantize(x, xq);
+                matvec_q8(y, blocks, xq, rows, cols);
+            }
+            QMat::Q4K(blocks) => {
+                let xk = &mut self.q8k[..cols / QK_K];
+                kquant::quantize_q8k(x, xk);
+                kquant::matvec_q4k(y, blocks, xk, rows, cols);
+            }
+            QMat::Q6K(blocks) => {
+                let xk = &mut self.q8k[..cols / QK_K];
+                kquant::quantize_q8k(x, xk);
+                kquant::matvec_q6k(y, blocks, xk, rows, cols);
+            }
+        }
+    }
+
+    /// Run several matvecs that share one input vector, quantizing each
+    /// needed format exactly once.
+    fn matvec_group(&mut self, jobs: &mut [(&mut [f32], QMat)], x: &[f32]) {
+        let cols = x.len();
+        let mut q8_ready = false;
+        let mut q8k_ready = false;
+        for (y, w) in jobs.iter_mut() {
+            match w {
+                QMat::Q8(blocks) => {
+                    if !q8_ready {
+                        q8::quantize(x, &mut self.q8[..cols / QK8_0]);
+                        q8_ready = true;
+                    }
+                    matvec_q8(y, blocks, &self.q8[..cols / QK8_0], y.len(), cols);
+                }
+                QMat::Q4K(blocks) => {
+                    if !q8k_ready {
+                        kquant::quantize_q8k(x, &mut self.q8k[..cols / QK_K]);
+                        q8k_ready = true;
+                    }
+                    kquant::matvec_q4k(y, blocks, &self.q8k[..cols / QK_K], y.len(), cols);
+                }
+                QMat::Q6K(blocks) => {
+                    if !q8k_ready {
+                        kquant::quantize_q8k(x, &mut self.q8k[..cols / QK_K]);
+                        q8k_ready = true;
+                    }
+                    kquant::matvec_q6k(y, blocks, &self.q8k[..cols / QK_K], y.len(), cols);
+                }
+            }
+        }
+    }
+}
+
 pub struct InferCtx<'m> {
     pub dims: Dims,
     pub weights: Weights<'m>,
     norm_eps: f32,
+    rope_style: rope::RopeStyle,
     freqs: &'static mut [f32],
     // Scratch (all preallocated; generation never allocates).
     x: &'static mut [f32],
     xb: &'static mut [f32],
     xb2: &'static mut [f32],
     q: &'static mut [f32],
+    attn_out: &'static mut [f32],
     k: &'static mut [f32],
     v: &'static mut [f32],
     att: &'static mut [f32],
     gate: &'static mut [f32],
     up: &'static mut [f32],
     logits: &'static mut [f32],
-    xq: &'static mut [BlockQ8_0],
-    fq: &'static mut [BlockQ8_0],
+    acts: Acts,
     /// f16 bits, [n_layers][ctx][kv_dim].
     key_cache: &'static mut [u16],
     val_cache: &'static mut [u16],
@@ -70,7 +189,7 @@ pub struct InferCtx<'m> {
 pub type AllocFn<'f> = &'f mut dyn FnMut(usize, usize) -> *mut u8;
 
 fn take<T>(alloc: AllocFn, n: usize) -> &'static mut [T] {
-    let bytes = n * core::mem::size_of::<T>();
+    let bytes = (n * core::mem::size_of::<T>()).max(1);
     let ptr = alloc(bytes, core::mem::align_of::<T>().max(64));
     assert!(!ptr.is_null(), "inference arena exhausted");
     // SAFETY: the callback contract hands us exclusive, zeroed, aligned
@@ -78,57 +197,88 @@ fn take<T>(alloc: AllocFn, n: usize) -> &'static mut [T] {
     unsafe { core::slice::from_raw_parts_mut(ptr as *mut T, n) }
 }
 
+fn dims_of(model: &Model, ctx: usize) -> Dims {
+    let m = &model.meta;
+    Dims {
+        dim: m.dim as usize,
+        att_dim: (m.n_heads * m.head_dim) as usize,
+        n_layers: m.n_layers as usize,
+        n_heads: m.n_heads as usize,
+        n_kv_heads: m.n_kv_heads as usize,
+        head_dim: m.head_dim as usize,
+        kv_dim: (m.n_kv_heads * m.head_dim) as usize,
+        ffn_dim: m.ffn_dim as usize,
+        vocab: m.vocab as usize,
+        ctx,
+    }
+}
+
 impl<'m> InferCtx<'m> {
     /// Bytes of scratch + KV needed for a given context length (for
     /// sizing arenas before construction).
     pub fn required_bytes(model: &Model, ctx: usize) -> usize {
-        let m = &model.meta;
-        let (dim, ffn, vocab) = (m.dim as usize, m.ffn_dim as usize, m.vocab as usize);
-        let kv_dim = (m.n_kv_heads * m.head_dim) as usize;
-        let f32s = dim * 4 + kv_dim * 2 + (m.n_heads as usize) * ctx + ffn * 2 + vocab
-            + (m.head_dim as usize) / 2;
-        let q8s = (dim / QK8_0 + ffn / QK8_0) * core::mem::size_of::<BlockQ8_0>();
-        let kv = 2 * (m.n_layers as usize) * ctx * kv_dim * 2;
-        f32s * 4 + q8s + kv + 4096 // slack for alignment
+        let d = dims_of(model, ctx);
+        let maxd = d.dim.max(d.att_dim).max(d.ffn_dim);
+        let f32s = d.dim * 3 + d.att_dim * 2 + d.kv_dim * 2 + d.n_heads * ctx
+            + d.ffn_dim * 2 + d.vocab + d.head_dim / 2;
+        let acts = maxd / QK8_0 * core::mem::size_of::<BlockQ8_0>()
+            + maxd / QK_K * core::mem::size_of::<BlockQ8K>();
+        let kv = 2 * d.n_layers * ctx * d.kv_dim * 2;
+        f32s * 4 + acts + kv + 64 * 32 // alignment slack
     }
 
     pub fn new(model: &'m Model<'m>, ctx: usize, alloc: AllocFn) -> Result<InferCtx<'m>, ParseError> {
         let m = &model.meta;
-        let dims = Dims {
-            dim: m.dim as usize,
-            n_layers: m.n_layers as usize,
-            n_heads: m.n_heads as usize,
-            n_kv_heads: m.n_kv_heads as usize,
-            head_dim: m.head_dim as usize,
-            kv_dim: (m.n_kv_heads * m.head_dim) as usize,
-            ffn_dim: m.ffn_dim as usize,
-            vocab: m.vocab as usize,
-            ctx,
+        let dims = dims_of(model, ctx);
+
+        // Shape-checked tensor accessors.
+        let f32_tensor = |kind: TensorKind, layer: usize, len: usize| -> Result<&'m [f32], ParseError> {
+            let v = model.tensor(kind, layer)?;
+            let s = v.f32();
+            if s.len() != len {
+                return Err(ParseError::MissingTensor("bad f32 tensor shape"));
+            }
+            Ok(s)
+        };
+        let mat = |kind: TensorKind, layer: usize, rows: usize, cols: usize| -> Result<QMat<'m>, ParseError> {
+            let v = model.tensor(kind, layer)?;
+            if v.rows != rows || v.cols != cols {
+                return Err(ParseError::MissingTensor("bad matrix shape"));
+            }
+            QMat::from_view(v)
         };
 
-        let f32_view = |v: TensorView<'m>| v.f32();
-        let q8_view = |v: TensorView<'m>| v.q8();
-
-        let embed = q8_view(model.tensor(TensorKind::TokEmbed, 0)?);
+        let embed = mat(TensorKind::TokEmbed, 0, dims.vocab, dims.dim)?;
+        let is_qwen = m.arch == Arch::Qwen3;
         let mut layers = alloc::vec::Vec::with_capacity(dims.n_layers);
         for l in 0..dims.n_layers {
             layers.push(LayerWeights {
-                attn_norm: f32_view(model.tensor(TensorKind::AttnNorm, l)?),
-                wq: q8_view(model.tensor(TensorKind::AttnQ, l)?),
-                wk: q8_view(model.tensor(TensorKind::AttnK, l)?),
-                wv: q8_view(model.tensor(TensorKind::AttnV, l)?),
-                wo: q8_view(model.tensor(TensorKind::AttnO, l)?),
-                ffn_norm: f32_view(model.tensor(TensorKind::FfnNorm, l)?),
-                w_gate: q8_view(model.tensor(TensorKind::FfnGate, l)?),
-                w_up: q8_view(model.tensor(TensorKind::FfnUp, l)?),
-                w_down: q8_view(model.tensor(TensorKind::FfnDown, l)?),
+                attn_norm: f32_tensor(TensorKind::AttnNorm, l, dims.dim)?,
+                q_norm: if is_qwen {
+                    Some(f32_tensor(TensorKind::AttnQNorm, l, dims.head_dim)?)
+                } else {
+                    None
+                },
+                k_norm: if is_qwen {
+                    Some(f32_tensor(TensorKind::AttnKNorm, l, dims.head_dim)?)
+                } else {
+                    None
+                },
+                wq: mat(TensorKind::AttnQ, l, dims.att_dim, dims.dim)?,
+                wk: mat(TensorKind::AttnK, l, dims.kv_dim, dims.dim)?,
+                wv: mat(TensorKind::AttnV, l, dims.kv_dim, dims.dim)?,
+                wo: mat(TensorKind::AttnO, l, dims.dim, dims.att_dim)?,
+                ffn_norm: f32_tensor(TensorKind::FfnNorm, l, dims.dim)?,
+                w_gate: mat(TensorKind::FfnGate, l, dims.ffn_dim, dims.dim)?,
+                w_up: mat(TensorKind::FfnUp, l, dims.ffn_dim, dims.dim)?,
+                w_down: mat(TensorKind::FfnDown, l, dims.dim, dims.ffn_dim)?,
             });
         }
-        let out_norm = f32_view(model.tensor(TensorKind::OutputNorm, 0)?);
-        let output = if model.meta.flags & crate::format::FLAG_TIED_EMBEDDINGS != 0 {
+        let out_norm = f32_tensor(TensorKind::OutputNorm, 0, dims.dim)?;
+        let output = if m.flags & crate::format::FLAG_TIED_EMBEDDINGS != 0 {
             embed
         } else {
-            q8_view(model.tensor(TensorKind::Output, 0)?)
+            mat(TensorKind::Output, 0, dims.vocab, dims.dim)?
         };
         let weights = Weights { embed, layers, out_norm, output };
 
@@ -152,21 +302,26 @@ impl<'m> InferCtx<'m> {
             rope::rope_freqs(freqs, dims.head_dim, m.rope_theta, scaling);
         }
 
+        let maxd = dims.dim.max(dims.att_dim).max(dims.ffn_dim);
         Ok(InferCtx {
             norm_eps: m.norm_eps,
+            rope_style: match m.arch {
+                Arch::Llama3 => rope::RopeStyle::Adjacent,
+                Arch::Qwen3 => rope::RopeStyle::Neox,
+            },
             freqs,
             x: take(alloc, dims.dim),
             xb: take(alloc, dims.dim),
             xb2: take(alloc, dims.dim),
-            q: take(alloc, dims.dim),
+            q: take(alloc, dims.att_dim),
+            attn_out: take(alloc, dims.att_dim),
             k: take(alloc, dims.kv_dim),
             v: take(alloc, dims.kv_dim),
             att: take(alloc, dims.n_heads * ctx),
             gate: take(alloc, dims.ffn_dim),
             up: take(alloc, dims.ffn_dim),
             logits: take(alloc, dims.vocab),
-            xq: take(alloc, dims.dim / QK8_0),
-            fq: take(alloc, dims.ffn_dim / QK8_0),
+            acts: Acts { q8: take(alloc, maxd / QK8_0), q8k: take(alloc, maxd / QK_K) },
             key_cache: take(alloc, dims.n_layers * ctx * dims.kv_dim),
             val_cache: take(alloc, dims.n_layers * ctx * dims.kv_dim),
             dims,
@@ -196,22 +351,31 @@ impl<'m> InferCtx<'m> {
         let pos = self.pos;
         assert!(pos < d.ctx, "context window exhausted");
 
-        // Token embedding (dequantized Q8_0 row).
-        let bpr = d.dim / QK8_0;
-        let row = &self.weights.embed[token as usize * bpr..(token as usize + 1) * bpr];
-        q8::dequantize(row, self.x);
+        // Token embedding (dequantized row).
+        self.weights.embed.dequant_row(token as usize, d.dim, self.x);
 
         for l in 0..d.n_layers {
             let w = &self.weights.layers[l];
 
             // Attention block.
             tvec::rmsnorm(self.xb, self.x, w.attn_norm, self.norm_eps);
-            q8::quantize(self.xb, self.xq);
-            matvec_q8(self.q, w.wq, self.xq, d.dim, d.dim);
-            matvec_q8(self.k, w.wk, self.xq, d.kv_dim, d.dim);
-            matvec_q8(self.v, w.wv, self.xq, d.kv_dim, d.dim);
-            rope::apply(self.q, d.head_dim, self.freqs, pos);
-            rope::apply(self.k, d.head_dim, self.freqs, pos);
+            self.acts.matvec_group(
+                &mut [(self.q, w.wq), (self.k, w.wk), (self.v, w.wv)],
+                self.xb,
+            );
+
+            // Qwen3: per-head RMSNorm on Q and K, before RoPE.
+            if let (Some(qn), Some(kn)) = (w.q_norm, w.k_norm) {
+                for head in self.q.chunks_exact_mut(d.head_dim) {
+                    tvec::rmsnorm_inplace(head, qn, self.norm_eps);
+                }
+                for head in self.k.chunks_exact_mut(d.head_dim) {
+                    tvec::rmsnorm_inplace(head, kn, self.norm_eps);
+                }
+            }
+
+            rope::apply(self.q, d.head_dim, self.freqs, pos, self.rope_style);
+            rope::apply(self.k, d.head_dim, self.freqs, pos, self.rope_style);
 
             // Append K/V to the cache as f16.
             let cache_row = (l * d.ctx + pos) * d.kv_dim;
@@ -233,7 +397,7 @@ impl<'m> InferCtx<'m> {
                     *a = dot_f16(&self.key_cache[krow..krow + d.head_dim], qh) * scale;
                 }
                 tvec::softmax(att);
-                let out = &mut self.xb[h * d.head_dim..(h + 1) * d.head_dim];
+                let out = &mut self.attn_out[h * d.head_dim..(h + 1) * d.head_dim];
                 out.fill(0.0);
                 for (t, &a) in att.iter().enumerate() {
                     let vrow = (l * d.ctx + t) * d.kv_dim + kvh;
@@ -241,25 +405,20 @@ impl<'m> InferCtx<'m> {
                 }
             }
 
-            q8::quantize(self.xb, self.xq);
-            matvec_q8(self.xb2, w.wo, self.xq, d.dim, d.dim);
+            self.acts.matvec(self.xb2, w.wo, self.attn_out);
             tvec::add_assign(self.x, self.xb2);
 
             // MLP block (SwiGLU).
             tvec::rmsnorm(self.xb, self.x, w.ffn_norm, self.norm_eps);
-            q8::quantize(self.xb, self.xq);
-            matvec_q8(self.gate, w.w_gate, self.xq, d.ffn_dim, d.dim);
-            matvec_q8(self.up, w.w_up, self.xq, d.ffn_dim, d.dim);
+            self.acts.matvec_group(&mut [(self.gate, w.w_gate), (self.up, w.w_up)], self.xb);
             tvec::swiglu(self.gate, self.up);
-            q8::quantize(self.gate, self.fq);
-            matvec_q8(self.xb2, w.w_down, self.fq, d.dim, d.ffn_dim);
+            self.acts.matvec(self.xb2, w.w_down, self.gate);
             tvec::add_assign(self.x, self.xb2);
         }
 
         // Final norm + classifier.
         tvec::rmsnorm(self.xb, self.x, self.weights.out_norm, self.norm_eps);
-        q8::quantize(self.xb, self.xq);
-        matvec_q8(self.logits, self.weights.output, self.xq, d.vocab, d.dim);
+        self.acts.matvec(self.logits, self.weights.output, self.xb);
 
         self.pos += 1;
         self.logits

@@ -69,7 +69,10 @@ fn main() {
     // Build the token sequence.
     let mut ids: Vec<u32> = Vec::new();
     if raw {
-        ids.push(tok.specials.bos);
+        // Match llama.cpp: BOS only for families that use one (Qwen doesn't).
+        if tok.template == nr_token::blob::Template::Llama3 {
+            ids.push(tok.specials.bos);
+        }
         tok.encode_text(&prompt, &mut ids);
     } else {
         tok.encode_conversation_start(None, &mut ids);

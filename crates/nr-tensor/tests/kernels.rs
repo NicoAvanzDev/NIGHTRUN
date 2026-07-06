@@ -162,7 +162,7 @@ fn rope_identity_at_pos0() {
     let mut rng = Rng(5);
     let orig = rng.vec(64);
     let mut x = orig.clone();
-    rope::apply(&mut x, 64, &freqs, 0);
+    rope::apply(&mut x, 64, &freqs, 0, rope::RopeStyle::Adjacent);
     assert_eq!(x, orig);
 }
 
@@ -176,7 +176,7 @@ fn rope_rotation_matches_trig() {
     let orig: Vec<f32> = (1..=head_dim).map(|v| v as f32).collect();
     let mut x = orig.clone();
     let pos = 3usize;
-    rope::apply(&mut x, head_dim, &freqs, pos);
+    rope::apply(&mut x, head_dim, &freqs, pos, rope::RopeStyle::Adjacent);
     for i in 0..head_dim / 2 {
         let angle = pos as f32 * freqs[i];
         let (a, b) = (orig[2 * i], orig[2 * i + 1]);
