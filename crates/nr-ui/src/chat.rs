@@ -42,8 +42,13 @@ pub struct Stats<'a> {
     pub model: &'a str,
     pub mem_used_mb: u32,
     pub mem_total_mb: u32,
-    /// Milli-tokens per second; 0 hides the readout.
+    /// Generation rate, milli-tokens per second; 0 hides the readout.
     pub tok_s_milli: u32,
+    /// Prompt-processing rate, milli-tokens per second; 0 hides it.
+    pub pp_milli: u32,
+    pub ctx_used: u32,
+    pub ctx_max: u32,
+    pub cores: u32,
     pub generating: bool,
 }
 
@@ -61,7 +66,7 @@ pub fn draw(
 ) {
     surf.clear(theme::BG_DEEP);
     status_bar(surf, fonts, stats);
-    input_bar(surf, fonts, input, cursor_on);
+    input_bar(surf, fonts, input, cursor_on, stats.generating);
     scrollback(surf, fonts, turns, stats.generating);
     draw::scanlines(surf, 26);
 }
@@ -89,10 +94,21 @@ fn status_bar(surf: &mut Surface, fonts: &Fonts, stats: &Stats) {
     buf.push_str(stats.model);
     draw::text(surf, f, model_x, ty, &buf, theme::TEXT_DIM, 1, 0);
 
-    // Right side: memory, then rate.
+    // Right side: cores | memory | context | prefill | generation rate.
     let mut right = String::new();
+    fmt_u32(&mut right, stats.cores);
+    right.push_str("c  ");
     fmt_mem(&mut right, stats.mem_used_mb, stats.mem_total_mb);
-    right.push_str("   ");
+    right.push_str("  ctx ");
+    fmt_u32(&mut right, stats.ctx_used);
+    right.push('/');
+    fmt_u32(&mut right, stats.ctx_max);
+    right.push_str("  ");
+    if stats.pp_milli > 0 {
+        right.push_str("pp ");
+        fmt_milli(&mut right, stats.pp_milli);
+        right.push_str("  ");
+    }
     if stats.tok_s_milli > 0 {
         fmt_milli(&mut right, stats.tok_s_milli);
         right.push_str(" tok/s");
@@ -106,7 +122,7 @@ fn status_bar(surf: &mut Surface, fonts: &Fonts, stats: &Stats) {
     draw::text(surf, f, rx, ty, &right, rate_col, 1, 0);
 }
 
-fn input_bar(surf: &mut Surface, fonts: &Fonts, input: &str, cursor_on: bool) {
+fn input_bar(surf: &mut Surface, fonts: &Fonts, input: &str, cursor_on: bool, generating: bool) {
     let w = surf.width as i32;
     let h = surf.height as i32;
     let y0 = h - INPUT_H;
@@ -115,6 +131,10 @@ fn input_bar(surf: &mut Surface, fonts: &Fonts, input: &str, cursor_on: bool) {
 
     let f = &fonts.body;
     let ty = y0 + (INPUT_H - f.height as i32) / 2;
+    if generating {
+        draw::text(surf, f, MARGIN, ty, ">> generating - press ESC to stop", theme::TEXT_DIM, 1, 0);
+        return;
+    }
     draw::text(surf, f, MARGIN, ty, "user: ", theme::NEON_CYAN, 1, 0);
     let tx = MARGIN + draw::text_width(f, "user: ", 1, 0);
 

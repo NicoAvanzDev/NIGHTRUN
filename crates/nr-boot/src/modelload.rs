@@ -6,6 +6,7 @@ use uefi::proto::media::file::{File, FileAttribute, FileInfo, FileMode};
 use uefi::CString16;
 
 #[derive(Debug)]
+#[allow(dead_code)] // fields are read via Debug on the failure screen
 pub enum LoadError {
     Fs(uefi::Status),
     NotFound,

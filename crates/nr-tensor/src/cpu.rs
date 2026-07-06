@@ -38,8 +38,7 @@ fn probe() -> u8 {
     use core::arch::x86_64::{__cpuid, __cpuid_count};
 
     let mut bits = PROBED;
-    // SAFETY: cpuid is available on all x86_64.
-    let leaf1 = unsafe { __cpuid(1) };
+    let leaf1 = __cpuid(1);
     let osxsave = leaf1.ecx & (1 << 27) != 0;
     let avx = leaf1.ecx & (1 << 28) != 0;
     if !(osxsave && avx) {
@@ -61,7 +60,7 @@ fn probe() -> u8 {
     if leaf1.ecx & (1 << 29) != 0 {
         bits |= F16C;
     }
-    let leaf7 = unsafe { __cpuid_count(7, 0) };
+    let leaf7 = __cpuid_count(7, 0);
     if leaf7.ebx & (1 << 5) != 0 {
         bits |= AVX2;
     }

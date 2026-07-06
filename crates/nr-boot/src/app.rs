@@ -37,6 +37,8 @@ pub struct Platform {
     pub model_name: String,
     pub infer: InferCtx<'static>,
     pub sampler: Sampler,
+    pub cores: u32,
+    pub pp_milli: u32,
 }
 
 pub fn run(display: Display) {
@@ -47,7 +49,7 @@ pub fn run(display: Display) {
     nr_ui::splash::draw(&mut surf, &fonts, &footer);
     display.present(&surf);
     serial_println!("[app] splash");
-    for _ in 0..200 {
+    for _ in 0..350 {
         if input::poll().is_some() {
             break;
         }
@@ -105,11 +107,13 @@ fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx
     let t_boot = clock.now();
     let mut ui = BootUi { display: &display, surf, fonts: &fonts, frame: 0 };
 
-    // Stage 0: runtime init.
-    ui.show(0, 500, "TSC clock calibrated");
+    // Stage 0: runtime init (SIMD + multi-core bring-up).
+    ui.show(0, 300, "TSC clock calibrated");
     let simd = if nr_tensor_fast() { "AVX2+FMA kernels" } else { "scalar kernels (no AVX2)" };
-    ui.show(0, 1000, simd);
-    stall_us(120_000);
+    ui.show(0, 600, simd);
+    let workers = crate::smp::start_workers();
+    ui.show(0, 1000, &alloc::format!("{} cores online ({} inference workers)", workers + 1, workers));
+    stall_us(150_000);
 
     // Stage 1: memory scan.
     let ram_mb = conventional_ram_mb();
@@ -204,11 +208,25 @@ fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx
 
     // Stage 5: done.
     let boot_ms = clock.ticks_to_ms(clock.now() - t_boot);
+    serial_println!("[boot] chat-ready in {} ms (after splash)", boot_ms);
     ui.show(5, 1000, &alloc::format!("boot sequence {}.{}s", boot_ms / 1000, boot_ms % 1000 / 100));
     stall_us(400_000);
 
     let model_name = alloc::format!("{} Q8_0", model.meta.name_str());
-    Platform { display, fonts, clock, arena, ram_mb, model, tokenizer, model_name, infer, sampler }
+    Platform {
+        display,
+        fonts,
+        clock,
+        arena,
+        ram_mb,
+        model,
+        tokenizer,
+        model_name,
+        infer,
+        sampler,
+        cores: workers as u32 + 1,
+        pp_milli: 0,
+    }
 }
 
 fn nr_tensor_fast() -> bool {
@@ -321,6 +339,7 @@ fn generate(
         }
     }
     let prefill_ms = p.clock.ticks_to_ms(p.clock.now() - t0);
+    p.pp_milli = (ids.len() as u64 * 1_000_000 / prefill_ms.max(1)) as u32;
     serial_println!(
         "[gen] prefill {} tokens in {} ms ({} tok/s)",
         ids.len(),
@@ -407,6 +426,10 @@ fn draw_chat(
         mem_used_mb: ((p.model.total_size() + p.arena.used()) / (1024 * 1024)) as u32,
         mem_total_mb: p.ram_mb,
         tok_s_milli: rate_milli,
+        pp_milli: p.pp_milli,
+        ctx_used: p.infer.pos as u32,
+        ctx_max: p.infer.dims.ctx as u32,
+        cores: p.cores,
         generating,
     };
     let cursor_on = !generating && (frame / 16) % 2 == 0;

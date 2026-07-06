@@ -5,14 +5,32 @@
 use crate::cpu;
 use crate::q8::{BlockQ8_0, QK8_0};
 
+struct SendPtr(*mut f32);
+unsafe impl Send for SendPtr {}
+unsafe impl Sync for SendPtr {}
+
+impl SendPtr {
+    /// Method (not field) access so closures capture the whole Sync
+    /// wrapper rather than the raw pointer.
+    fn get(&self) -> *mut f32 {
+        self.0
+    }
+}
+
 /// y[r] = dot(w[r, :], x) for row-major Q8_0 `w` (rows x cols) and
-/// Q8_0-quantized activation `x` (cols values).
+/// Q8_0-quantized activation `x` (cols values). Rows are split across the
+/// worker pool when one is active.
 pub fn matvec_q8(y: &mut [f32], w: &[BlockQ8_0], x: &[BlockQ8_0], rows: usize, cols: usize) {
     let bpr = cols / QK8_0;
     assert_eq!(y.len(), rows);
     assert_eq!(x.len(), bpr);
     assert!(w.len() >= rows * bpr);
-    matvec_q8_range(y, w, x, 0, rows, bpr);
+    let yp = SendPtr(y.as_mut_ptr());
+    crate::parallel::POOL.run(rows, &|r0, r1| {
+        // SAFETY: ranges are disjoint, so each worker writes its own slice.
+        let out = unsafe { core::slice::from_raw_parts_mut(yp.get().add(r0), r1 - r0) };
+        matvec_q8_range(out, w, x, r0, r1, bpr);
+    });
 }
 
 /// Row-range variant used to split work across cores.
@@ -119,6 +137,9 @@ unsafe fn axpy_f16_f16c(out: &mut [f32], a: f32, v: &[u16]) {
     }
 }
 
+/// # Safety
+/// Caller must ensure AVX2+FMA are supported and YMM state is enabled
+/// (see [`cpu::fast_path`]).
 #[target_feature(enable = "avx2,fma")]
 pub unsafe fn dot_q8_avx2(w: &[BlockQ8_0], x: &[BlockQ8_0]) -> f32 {
     use core::arch::x86_64::*;

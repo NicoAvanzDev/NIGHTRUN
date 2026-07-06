@@ -27,11 +27,57 @@ fn main() {
             build_image(true);
         }
         Some("run") => run(parse_run_opts(&args[1..])),
+        Some("bench") => bench(),
         _ => {
-            eprintln!("usage: cargo xtask <build|image|run> [options]");
+            eprintln!("usage: cargo xtask <build|image|run|bench> [options]");
             std::process::exit(2);
         }
     }
+}
+
+/// Boot the image in QEMU, run a scripted prompt, and record measured
+/// numbers from the serial log into docs/benchmarks.md.
+fn bench() {
+    let root = root();
+    let opts = parse_run_opts(
+        &["--img", "--mem", "4G", "--smp", "8", "--secs", "150", "--keys",
+          "35:Explain what a rotary positional embedding is in two sentences.\\n"]
+            .map(String::from),
+    );
+    run(opts);
+
+    let log = std::fs::read_to_string(root.join("target/serial.log")).expect("serial log");
+    let grab = |pat: &str| -> Option<String> {
+        log.lines().find(|l| l.contains(pat)).map(|l| l.trim().to_string())
+    };
+    let mut out = String::from("# NightRun benchmarks (measured)\n\n");
+    out.push_str("Environment: QEMU q35, KVM, `-cpu max -smp 8 -m 4G`, OVMF; ");
+    out.push_str(&format!(
+        "host: {} hardware threads.\nDate: {}\n\n```\n",
+        std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0),
+        String::from_utf8_lossy(
+            &Command::new("date").arg("+%Y-%m-%d").output().unwrap().stdout
+        )
+        .trim(),
+    ));
+    for pat in [
+        "[smp]",
+        "workers active",
+        "model loaded:",
+        "verified in",
+        "chat-ready in",
+        "prefill",
+        "milli-tok/s",
+    ] {
+        if let Some(line) = grab(pat) {
+            out.push_str(&line);
+            out.push('\n');
+        }
+    }
+    out.push_str("```\n\nSee docs/architecture.md for the performance discussion.\n");
+    std::fs::create_dir_all(root.join("docs")).unwrap();
+    std::fs::write(root.join("docs/benchmarks.md"), &out).unwrap();
+    println!("--- wrote docs/benchmarks.md:\n{out}");
 }
 
 /// Build nightrun.img. When `fresh` (or no image exists) the whole image is
@@ -94,6 +140,7 @@ struct RunOpts {
     window: bool,
     img: bool,
     mem: Option<String>,
+    smp: Option<String>,
     secs: Option<u64>,
     shots: Vec<(u64, String)>,
     keys: Vec<(u64, String)>,
@@ -108,6 +155,7 @@ fn parse_run_opts(args: &[String]) -> RunOpts {
             "--window" => o.window = true,
             "--img" => o.img = true,
             "--mem" => o.mem = Some(val()),
+            "--smp" => o.smp = Some(val()),
             "--secs" => o.secs = Some(val().parse().unwrap()),
             "--shot" => {
                 let v = val();
@@ -155,6 +203,7 @@ fn run(opts: RunOpts) {
         .args(["-accel", "kvm", "-accel", "tcg"])
         .args(["-cpu", "max"])
         .args(["-m", opts.mem.as_deref().unwrap_or("2G")])
+        .args(["-smp", opts.smp.as_deref().unwrap_or("8")])
         .args(["-drive", &format!("if=pflash,format=raw,readonly=on,file={ovmf_code}")])
         .args(["-drive", &format!("if=pflash,format=raw,file={}", vars.display())])
         .args(["-drive", &boot_drive])

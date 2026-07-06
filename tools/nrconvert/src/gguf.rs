@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // parsed for completeness; only some variants are read
 pub enum Value {
     U8(u8),
     I8(i8),

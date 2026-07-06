@@ -68,7 +68,7 @@ pub fn draw(surf: &mut Surface, fonts: &Fonts, st: &LoadState) {
     // Progress bar.
     let bx = px + 36;
     let bw = pw - 72;
-    let by = py + ph - 96;
+    let by = py + ph - 64;
     let bh = 20;
     let overall = ((st.current.min(st.stages.len()) as u32)
         .saturating_mul(1000)

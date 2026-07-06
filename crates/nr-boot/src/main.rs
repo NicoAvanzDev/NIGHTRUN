@@ -10,6 +10,7 @@ pub mod serial;
 mod app;
 mod input;
 mod modelload;
+mod smp;
 mod video;
 
 use core::fmt::Write as _;
@@ -38,14 +39,23 @@ fn main() -> Status {
 /// Enable AVX (YMM state) via XCR0 so the AVX2/FMA/F16C kernels can run.
 /// UEFI guarantees SSE only; we do the OSXSAVE dance ourselves.
 fn enable_avx() {
+    if !enable_avx_quiet() {
+        serial_println!("[cpu] no AVX - scalar kernels");
+        return;
+    }
+    let f = nr_tensor::cpu::features();
+    serial_println!("[cpu] avx enabled; avx2={} fma={} f16c={}", f.avx2, f.fma, f.f16c);
+}
+
+/// AVX enable without serial output (also used by AP worker bring-up,
+/// where two cores sharing the serial port would interleave garbage).
+pub fn enable_avx_quiet() -> bool {
     use core::arch::x86_64::__cpuid;
-    // SAFETY: cpuid is always available on x86_64.
-    let leaf1 = unsafe { __cpuid(1) };
+    let leaf1 = __cpuid(1);
     let xsave = leaf1.ecx & (1 << 26) != 0;
     let avx = leaf1.ecx & (1 << 28) != 0;
     if !(xsave && avx) {
-        serial_println!("[cpu] no AVX - scalar kernels");
-        return;
+        return false;
     }
     // SAFETY: CPL0 under UEFI; setting CR4.OSXSAVE then XCR0 x87|SSE|AVX.
     unsafe {
@@ -65,8 +75,7 @@ fn enable_avx() {
             options(nostack)
         );
     }
-    let f = nr_tensor::cpu::features();
-    serial_println!("[cpu] avx enabled; avx2={} fma={} f16c={}", f.avx2, f.fma, f.f16c);
+    true
 }
 
 // ---- Panic screen ----------------------------------------------------------

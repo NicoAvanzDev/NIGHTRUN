@@ -19,8 +19,10 @@ fn main() {
     let mut raw = false;
     let mut ctx = 4096usize;
     let mut seed = 0x5eed_cafe_u64;
+    let mut threads = 1usize;
     while let Some(a) = args.next() {
         match a.as_str() {
+            "--threads" => threads = args.next().unwrap().parse().unwrap(),
             "--prompt" => prompt = args.next().unwrap(),
             "-n" => n_tokens = args.next().unwrap().parse().unwrap(),
             "--temp" => temp = args.next().unwrap().parse().unwrap(),
@@ -30,6 +32,18 @@ fn main() {
             "--raw" => raw = true,
             other => panic!("unknown arg {other}"),
         }
+    }
+
+    if threads > 1 {
+        let workers = threads - 1;
+        for _ in 0..workers {
+            std::thread::spawn(|| nr_tensor::parallel::POOL.worker_loop());
+        }
+        while nr_tensor::parallel::POOL.ready_workers() < workers {
+            std::thread::yield_now();
+        }
+        nr_tensor::parallel::POOL.activate(workers);
+        eprintln!("{threads} threads ({workers} workers)");
     }
 
     eprintln!("loading {model_path} ...");

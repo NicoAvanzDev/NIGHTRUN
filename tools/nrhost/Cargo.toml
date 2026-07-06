@@ -6,4 +6,5 @@ license.workspace = true
 
 [dependencies]
 nr-model = { path = "../../crates/nr-model" }
+nr-tensor = { path = "../../crates/nr-tensor" }
 nr-token = { path = "../../crates/nr-token" }
