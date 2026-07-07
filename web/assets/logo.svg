@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 268 34" role="img" aria-label="NIGHTRUN">
+  <defs>
+    <linearGradient id="lg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fdfbff"/>
+      <stop offset="0.22" stop-color="#ffe95e"/>
+      <stop offset="0.52" stop-color="#ff9e3d"/>
+      <stop offset="0.78" stop-color="#ff2d95"/>
+      <stop offset="1" stop-color="#c21bb4"/>
+    </linearGradient>
+  </defs>
+  <text x="2" y="27" font-family="ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace"
+        font-size="28" font-weight="800" letter-spacing="5" fill="url(#lg)">NIGHTRUN</text>
+</svg>

@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install NightRun — bootable LLM media for x86_64 and Raspberry Pi 5</title>
+<meta name="description" content="Guided and manual installation of NightRun: build a bootable USB drive for x86_64 UEFI machines or an SD card for the Raspberry Pi 5, with verified models and safe flashing.">
+<link rel="stylesheet" href="css/site.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23ffd319'/%3E%3Cstop offset='.55' stop-color='%23ff9e3d'/%3E%3Cstop offset='1' stop-color='%23ff2d95'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='6' fill='%2307020f'/%3E%3Ctext x='16' y='23' font-family='monospace' font-size='19' font-weight='bold' text-anchor='middle' fill='url(%23g)'%3EN%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="wrap">
+    <nav class="nav" aria-label="Main">
+      <a class="brand" href="index.html"><img src="assets/logo.svg" alt="NightRun home" height="20"></a>
+      <input type="checkbox" id="navtoggle" class="nav-toggle" aria-hidden="true">
+      <label for="navtoggle" class="nav-toggle-label" aria-hidden="true">☰</label>
+      <ul>
+        <li><a href="index.html">Home</a></li>
+        <li><a href="architecture.html">Architecture</a></li>
+        <li><a href="docs.html">Documentation</a></li>
+        <li><a href="install.html" aria-current="page">Install</a></li>
+        <li><a href="https://github.com/hardrave/NIGHTRUN">GitHub</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main>
+<div class="wrap">
+
+  <div class="hero">
+    <h1>Install NightRun</h1>
+    <p class="sub">Boot a local LLM runtime from a USB drive or a Raspberry&nbsp;Pi&nbsp;5 microSD card.</p>
+  </div>
+
+  <div class="warn">
+    Flashing boot media <strong>permanently erases</strong> the selected USB drive or microSD card.
+    The guided installer requires an exact typed confirmation naming the device; when flashing
+    manually, always double-check the target with <code>lsblk</code> first.
+  </div>
+
+  <section id="guided">
+    <h2><span class="slash">//</span>Guided installation (recommended)</h2>
+    <p>The interactive installer handles the whole journey:</p>
+    <pre data-copy><code>git clone https://github.com/hardrave/NIGHTRUN.git
+cd NIGHTRUN
+./install.sh</code></pre>
+    <p>It walks you through, in order:</p>
+    <ul class="plain">
+      <li>choosing <strong>x86_64 UEFI</strong> or <strong>Raspberry Pi 5</strong> (genuinely different images);</li>
+      <li>choosing a model from a target-filtered catalog, or bringing your own GGUF;</li>
+      <li>downloading the exact pinned artifact with SHA-256 verification, or inspecting your local file's real metadata;</li>
+      <li>converting to NightRun's format and assembling the correct target image;</li>
+      <li>detecting removable USB/SD media — system disks are never listed;</li>
+      <li>unmounting the target only after your explicit approval;</li>
+      <li>a two-stage destructive confirmation (the second stage is typing <code>FLASH /dev/sdX</code> exactly);</li>
+      <li>flashing the whole device with progress, then <strong>verifying by reading it back</strong>;</li>
+      <li>printing target-specific boot instructions.</li>
+    </ul>
+    <p class="muted">
+      Prefer to inspect before running? Read
+      <a href="https://github.com/hardrave/NIGHTRUN/blob/master/install.sh">install.sh on GitHub</a>
+      and the <a href="https://github.com/hardrave/NIGHTRUN/blob/master/docs/installer.md">installer documentation</a> —
+      the clone-first path above is always the recommended one, and there is deliberately no
+      pipe-to-shell-only flow.
+    </p>
+  </section>
+
+  <section id="guided-x86">
+    <h2><span class="slash">//</span>x86_64 UEFI — guided</h2>
+    <dl class="rows">
+      <dt>Host requirements</dt><dd>Linux with Bash ≥ 4, Rust via rustup (stable + nightly with <code>rust-src</code>), ~10 GB free disk for model + image work</dd>
+      <dt>Boot media</dt><dd>USB drive, 4 GB or larger</dd>
+      <dt>Target machine</dt><dd>x86_64 with UEFI firmware, USB boot enabled, <strong>Secure Boot off</strong>; AVX2 CPU strongly recommended (a scalar fallback exists but is slow)</dd>
+      <dt>Target RAM</dt><dd>Llama 1B: 4 GB · Granite 3B: 6 GB · Qwen3 4B: 8 GB</dd>
+    </dl>
+    <p>
+      Run <code>./install.sh</code>, choose <strong>[1] x86_64 UEFI</strong>, pick a model, and follow
+      the flow. When it finishes: plug the USB drive into the target machine, open the firmware
+      boot menu (typically F12, F10 or Esc at power-on), select the NightRun drive, and boot. The
+      splash appears, the model loads with a progress bar, and the chat is ready in seconds.
+    </p>
+  </section>
+
+  <section id="guided-pi">
+    <h2><span class="slash">//</span>Raspberry Pi 5 — guided</h2>
+    <dl class="rows">
+      <dt>Board</dt><dd>Raspberry Pi 5 (D0 and C1 revisions supported; D0 hardware-verified)</dd>
+      <dt>Boot media</dt><dd>microSD card, 4 GB or larger (A1/A2-rated cards load the model faster)</dd>
+      <dt>EEPROM</dt><dd><strong>2025-06-09 or newer</strong> — older EEPROMs break UEFI graphics on D0 boards; update from Raspberry Pi OS with <code>sudo rpi-eeprom-update -a</code> before first boot</dd>
+      <dt>Peripherals</dt><dd>HDMI display (use the port next to USB-C), USB keyboard, 5 V/3 A+ power, active cooling recommended</dd>
+      <dt>Models</dt><dd>Granite 3B (default) and Llama 1B on any board; Qwen3 4B needs an 8 GB board</dd>
+    </dl>
+    <p>
+      The Pi image embeds UEFI firmware compiled from a pinned, reviewed source tree — if it isn't
+      built yet, the installer offers to run <code>scripts/build-rpi5-firmware.sh</code> for you
+      (needs <code>gcc-aarch64-linux-gnu acpica-tools uuid-dev</code>). Then choose
+      <strong>[2] Raspberry Pi 5</strong> and follow the same flow. First boot shows a QR screen,
+      then the Raspberry&nbsp;Pi logo, then NightRun's splash. Details and bring-up notes:
+      <a href="https://github.com/hardrave/NIGHTRUN/blob/master/docs/rpi5-uefi.md">docs/rpi5-uefi.md</a>.
+    </p>
+  </section>
+
+  <section id="manual-x86">
+    <h2><span class="slash">//</span>Manual installation — x86_64</h2>
+    <p>Every step the installer automates, by hand.</p>
+    <h3>1 · Toolchain and build</h3>
+    <pre data-copy><code>rustup toolchain install nightly --component rust-src
+cargo xtask build          <span class="c"># builds BOOTX64.EFI (custom hard-float UEFI target)</span>
+cargo test                 <span class="c"># host test suite: kernels, tokenizer, parity</span></code></pre>
+    <h3>2 · Get and convert a model</h3>
+    <pre data-copy><code>mkdir -p models
+curl -L -o models/granite-4.1-3b-Q4_K_M.gguf \
+  https://huggingface.co/ibm-granite/granite-4.1-3b-GGUF/resolve/main/granite-4.1-3b-Q4_K_M.gguf
+cargo run --release -p nrconvert -- \
+  models/granite-4.1-3b-Q4_K_M.gguf models/granite-4.1-3b-q4km.nrm</code></pre>
+    <p class="muted">
+      <code>nrconvert --inspect file.gguf</code> shows an artifact's architecture and per-tensor
+      dtypes before you commit to converting it. The converter validates its own output: it
+      re-parses the file, re-checksums it, and smoke-tests the tokenizer.
+    </p>
+    <h3>3 · Assemble the image</h3>
+    <pre data-copy><code>cargo xtask image --model models/granite-4.1-3b-q4km.nrm
+<span class="c"># optional dry run before flashing:</span>
+cargo xtask run --img --model models/granite-4.1-3b-q4km.nrm --mem 5G --window</code></pre>
+    <h3>4 · Identify the USB drive and flash</h3>
+    <pre data-copy><code>lsblk -o NAME,SIZE,TRAN,MODEL,MOUNTPOINTS
+sudo dd if=nightrun.img of=/dev/REPLACE_WITH_USB_DISK bs=4M status=progress conv=fsync</code></pre>
+    <div class="warn">
+      <code>dd</code> writes to the <strong>whole disk</strong> and permanently erases it.
+      The target must be the disk device (like <code>/dev/sdb</code>), never a partition
+      (<code>/dev/sdb1</code> is wrong). Check <code>lsblk</code> output twice — size, transport
+      and model name should all match your stick.
+    </div>
+    <h3>5 · Boot</h3>
+    <p>
+      Firmware boot menu (F12/F10/Esc) → select the USB drive in UEFI mode, Secure Boot disabled.
+      A serial console on COM1 (115200) carries debug logs if you want them.
+    </p>
+  </section>
+
+  <section id="manual-pi">
+    <h2><span class="slash">//</span>Manual installation — Raspberry Pi 5</h2>
+    <h3>1 · Build the Pi UEFI firmware from pinned source</h3>
+    <pre data-copy><code>sudo apt install gcc-aarch64-linux-gnu acpica-tools uuid-dev
+rustup target add aarch64-unknown-uefi
+scripts/build-rpi5-firmware.sh     <span class="c"># TF-A + EDK2 at a reviewed pin; prints SHA-256s</span></code></pre>
+    <h3>2 · Convert a model (same as x86) and assemble the SD image</h3>
+    <pre data-copy><code>cargo xtask pi-image --model models/granite-4.1-3b-q4km.nrm
+<span class="c"># produces nightrun-pi5.img: MBR + FAT32 with firmware, DTBs, BOOTAA64.EFI, model</span></code></pre>
+    <h3>3 · Flash the microSD card</h3>
+    <pre data-copy><code>lsblk -o NAME,SIZE,TRAN,MODEL,MOUNTPOINTS
+sudo dd if=nightrun-pi5.img of=/dev/REPLACE_WITH_SD_CARD bs=4M status=progress conv=fsync</code></pre>
+    <h3>4 · First boot</h3>
+    <ul class="plain">
+      <li>Make sure the board's EEPROM is 2025-06-09 or newer (see the guided section above).</li>
+      <li>Insert the card, connect HDMI (port next to USB-C) and a USB keyboard, power on.</li>
+      <li>Expected sequence: QR screen → Raspberry Pi logo with progress bar → NightRun splash → model loading → chat.</li>
+    </ul>
+  </section>
+
+  <section id="models-src">
+    <h2><span class="slash">//</span>Model sources</h2>
+    <p>Two acquisition paths, both ending in the same validation:</p>
+    <ul class="plain">
+      <li><strong>Verified download</strong> — the installer's catalog pins each model to an exact
+        Hugging Face revision and SHA-256; downloads resume, verify, and are checked for real GGUF
+        structure before use. None of the catalog models are gated; if you add one that is, the
+        installer explains the official license-acceptance flow and takes a token securely
+        (never echoed, never stored).</li>
+      <li><strong>Local GGUF</strong> — your file is inspected for its actual architecture and
+        tensor dtypes; a filename saying "Q4_K_M" proves nothing and is not trusted. Supported
+        families: Llama, Qwen3, and dense Granite. Hybrid Granite, SSM and MoE artifacts are
+        rejected with an explanation.</li>
+    </ul>
+    <p class="muted">
+      Model weights are licensed by their publishers (Llama Community License; Apache-2.0 for Qwen
+      and Granite builds used here) — respecting those licenses is your responsibility. Once media
+      is prepared, the runtime itself is fully offline.
+    </p>
+  </section>
+
+  <section id="verify">
+    <h2><span class="slash">//</span>Flashing and verification</h2>
+    <p>
+      The guided installer writes the whole device in 4 MiB direct-I/O blocks, flushes, and then
+      <strong>reads back exactly the image-sized region and compares SHA-256 digests</strong> with
+      the source image. A mismatch is reported as unreliable media — the drive is never called
+      bootable on hope. Manual flashers can approximate this with:
+    </p>
+    <pre data-copy><code>IMG_BYTES=$(stat -c %s nightrun.img)
+sudo dd if=/dev/REPLACE_WITH_USB_DISK bs=4M iflag=count_bytes count=$IMG_BYTES status=none | sha256sum
+sha256sum nightrun.img   <span class="c"># the two digests must match</span></code></pre>
+  </section>
+
+  <section id="troubleshooting">
+    <h2><span class="slash">//</span>Troubleshooting</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Symptom</th><th>What to do</th></tr></thead>
+        <tbody>
+          <tr><td>No removable drive detected</td><td>Only USB/SD devices large enough for the image are listed — system disks never are. Insert media and choose Rescan.</td></tr>
+          <tr><td>Drive cannot be unmounted</td><td>Something is using it: close file managers and terminals inside it. The installer names the blocking partition.</td></tr>
+          <tr><td>Not enough disk space</td><td>Model download + conversion + image needs up to ~8 GB free in the repo; clear space or use the smaller Llama model.</td></tr>
+          <tr><td>Model does not fit target RAM</td><td>Pick per the table: Llama 4 GB, Granite 6 GB, Qwen 8 GB. The boot screen reports an arena failure otherwise.</td></tr>
+          <tr><td>GGUF incompatible</td><td>Run <code>nrconvert --inspect</code> — only Llama/Qwen3/dense-Granite families are supported; hybrids are rejected by design.</td></tr>
+          <tr><td>Conversion or image build fails</td><td>Full logs are kept in <code>build/nightrun-installer-logs/&lt;timestamp&gt;/</code>; the failing stage is named.</td></tr>
+          <tr><td>Verification mismatch</td><td>Usually worn flash or a flaky reader: re-flash; if it repeats, use different media. The drive is not trustworthy for boot.</td></tr>
+          <tr><td>USB doesn't appear in the boot menu</td><td>Enable UEFI USB boot, disable Secure Boot, try another port; some firmwares list it under "UEFI: &lt;stick name&gt;".</td></tr>
+          <tr><td>Pi shows nothing on screen</td><td>Update the EEPROM (≥ 2025-06-09), use the HDMI port next to USB-C, and see <a href="https://github.com/hardrave/NIGHTRUN/blob/master/docs/rpi5-uefi.md">docs/rpi5-uefi.md</a> — the bootloader's Esc log diagnoses the stage.</td></tr>
+          <tr><td>Keyboard not detected</td><td>Use a plain wired keyboard; on the Pi prefer the black USB 2.0 ports. Wireless dongles sometimes never enumerate in firmware.</td></tr>
+          <tr><td>Model loading is slow</td><td>Load speed is media-bound: use USB 3 sticks / A1-A2 SD cards. ~1–2 GB loads in tens of seconds on decent media.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p>NightRun — code under the MIT license. Model weights are not included and remain subject to
+    their own licenses. Spleen bitmap font, BSD 2-Clause.</p>
+    <p><a href="https://github.com/hardrave/NIGHTRUN">github.com/hardrave/NIGHTRUN</a></p>
+  </div>
+</footer>
+
+<script src="js/site.js"></script>
+</body>
+</html>

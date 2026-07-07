@@ -1,0 +1,33 @@
+    Finished `release` profile [optimized] target(s) in 0.03s
+     Running `target/release/xtask image --model /home/michal/NightRun/models/model.nrm`
+warning: target feature `soft-float` must be enabled to ensure that the ABI of the current target can be implemented correctly
+  |
+  = note: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+  = note: for more information, see issue #116344 <https://github.com/rust-lang/rust/issues/116344>
+
+warning: `nr-gfx` (lib) generated 1 warning
+warning: `nr-token` (lib) generated 1 warning (1 duplicate)
+warning: `nr-runtime` (lib) generated 1 warning (1 duplicate)
+warning: `nr-tensor` (lib) generated 1 warning (1 duplicate)
+warning: `nr-ui` (lib) generated 1 warning (1 duplicate)
+warning: `nr-model` (lib) generated 1 warning (1 duplicate)
+warning: unnecessary `unsafe` block
+  --> crates/nr-boot/src/smp.rs:53:9
+   |
+53 |         unsafe {
+   |         ^^^^^^ unnecessary `unsafe` block
+   |
+   = note: `#[warn(unused_unsafe)]` (part of `#[warn(unused)]`) on by default
+
+warning: unnecessary `unsafe` block
+  --> crates/nr-boot/src/smp.rs:57:15
+   |
+57 |         match unsafe {
+   |               ^^^^^^ unnecessary `unsafe` block
+
+warning: `nr-boot` (bin "nr-boot") generated 3 warnings (1 duplicate)
+    Finished `release` profile [optimized] target(s) in 0.17s
+staged /home/michal/NightRun/target/esp
+image: /home/michal/NightRun/nightrun.img (1349 MB esp, model 1258 MB)
+  model.nrm: 16 / 1258 MB  model.nrm: 32 / 1258 MB  model.nrm: 48 / 1258 MB  model.nrm: 64 / 1258 MB  model.nrm: 80 / 1258 MB  model.nrm: 96 / 1258 MB  model.nrm: 112 / 1258 MB  model.nrm: 128 / 1258 MB  model.nrm: 144 / 1258 MB  model.nrm: 160 / 1258 MB  model.nrm: 176 / 1258 MB  model.nrm: 192 / 1258 MB  model.nrm: 208 / 1258 MB  model.nrm: 224 / 1258 MB  model.nrm: 240 / 1258 MB  model.nrm: 256 / 1258 MB  model.nrm: 272 / 1258 MB  model.nrm: 288 / 1258 MB  model.nrm: 304 / 1258 MB  model.nrm: 320 / 1258 MB  model.nrm: 336 / 1258 MB  model.nrm: 352 / 1258 MB  model.nrm: 368 / 1258 MB  model.nrm: 384 / 1258 MB  model.nrm: 400 / 1258 MB  model.nrm: 416 / 1258 MB  model.nrm: 432 / 1258 MB  model.nrm: 448 / 1258 MB  model.nrm: 464 / 1258 MB  model.nrm: 480 / 1258 MB  model.nrm: 496 / 1258 MB  model.nrm: 512 / 1258 MB  model.nrm: 528 / 1258 MB  model.nrm: 544 / 1258 MB  model.nrm: 560 / 1258 MB  model.nrm: 576 / 1258 MB  model.nrm: 592 / 1258 MB  model.nrm: 608 / 1258 MB  model.nrm: 624 / 1258 MB  model.nrm: 640 / 1258 MB  model.nrm: 656 / 1258 MB  model.nrm: 672 / 1258 MB  model.nrm: 688 / 1258 MB  model.nrm: 704 / 1258 MB  model.nrm: 720 / 1258 MB  model.nrm: 736 / 1258 MB  model.nrm: 752 / 1258 MB  model.nrm: 768 / 1258 MB  model.nrm: 784 / 1258 MB  model.nrm: 800 / 1258 MB  model.nrm: 816 / 1258 MB  model.nrm: 832 / 1258 MB  model.nrm: 848 / 1258 MB  model.nrm: 864 / 1258 MB  model.nrm: 880 / 1258 MB  model.nrm: 896 / 1258 MB  model.nrm: 912 / 1258 MB  model.nrm: 928 / 1258 MB  model.nrm: 944 / 1258 MB  model.nrm: 960 / 1258 MB  model.nrm: 976 / 1258 MB  model.nrm: 992 / 1258 MB  model.nrm: 1008 / 1258 MB  model.nrm: 1024 / 1258 MB  model.nrm: 1040 / 1258 MB  model.nrm: 1056 / 1258 MB  model.nrm: 1072 / 1258 MB  model.nrm: 1088 / 1258 MB  model.nrm: 1104 / 1258 MB  model.nrm: 1120 / 1258 MB  model.nrm: 1136 / 1258 MB  model.nrm: 1152 / 1258 MB  model.nrm: 1168 / 1258 MB  model.nrm: 1184 / 1258 MB  model.nrm: 1200 / 1258 MB  model.nrm: 1216 / 1258 MB  model.nrm: 1232 / 1258 MB  model.nrm: 1248 / 1258 MB  model.nrm: 1258 / 1258 MB
+image ready: /home/michal/NightRun/nightrun.img

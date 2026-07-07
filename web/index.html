@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NightRun — an LLM runtime that boots from USB, no operating system underneath</title>
+<meta name="description" content="NightRun is a UEFI-resident local LLM runtime: it boots from a USB stick or SD card, loads Llama, Qwen or Granite fully into RAM, and runs a chat with no Linux, no Windows, no conventional OS.">
+<meta property="og:title" content="NightRun — a local LLM runtime that boots">
+<meta property="og:description" content="Boots from USB, loads the model into RAM, runs without a conventional operating system. Rust, UEFI, x86_64 and Raspberry Pi 5.">
+<meta property="og:image" content="assets/screenshots/splash.png">
+<link rel="stylesheet" href="css/site.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23ffd319'/%3E%3Cstop offset='.55' stop-color='%23ff9e3d'/%3E%3Cstop offset='1' stop-color='%23ff2d95'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='6' fill='%2307020f'/%3E%3Ctext x='16' y='23' font-family='monospace' font-size='19' font-weight='bold' text-anchor='middle' fill='url(%23g)'%3EN%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="wrap">
+    <nav class="nav" aria-label="Main">
+      <a class="brand" href="index.html"><img src="assets/logo.svg" alt="NightRun home" height="20"></a>
+      <input type="checkbox" id="navtoggle" class="nav-toggle" aria-hidden="true">
+      <label for="navtoggle" class="nav-toggle-label" aria-hidden="true">☰</label>
+      <ul>
+        <li><a href="index.html" aria-current="page">Home</a></li>
+        <li><a href="architecture.html">Architecture</a></li>
+        <li><a href="docs.html">Documentation</a></li>
+        <li><a href="install.html">Install</a></li>
+        <li><a href="https://github.com/hardrave/NIGHTRUN">GitHub</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<div class="wrap">
+  <div class="hero">
+    <img class="logo" src="assets/logo.svg" alt="" aria-hidden="true">
+    <h1>An LLM runtime that boots from USB and runs without a conventional operating system.</h1>
+    <p class="sub">
+      NightRun is a UEFI-resident runtime written in Rust: your machine's firmware starts it
+      directly, it loads a language model entirely into RAM, and you chat on the framebuffer.
+      No Linux, no Windows, no kernel, no network — on x86_64 PCs and the Raspberry&nbsp;Pi&nbsp;5.
+    </p>
+    <span class="cta">
+      <a class="btn primary" href="install.html">Install NightRun</a>
+      <a class="btn" href="architecture.html">View Architecture</a>
+      <a class="btn" href="https://github.com/hardrave/NIGHTRUN">GitHub</a>
+    </span>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <section id="quick-start">
+    <h2><span class="slash">//</span>Quick start</h2>
+    <pre data-copy><code>git clone https://github.com/hardrave/NIGHTRUN.git
+cd NIGHTRUN
+./install.sh</code></pre>
+    <p class="muted">
+      The interactive installer builds a bootable image for your target (x86_64 USB or
+      Raspberry&nbsp;Pi&nbsp;5 SD card), downloads and verifies a model, and flashes removable media —
+      with an exact typed confirmation before anything destructive. Prefer to read before you run?
+      <a href="https://github.com/hardrave/NIGHTRUN/blob/master/install.sh">Inspect install.sh</a>
+      first, or follow the <a href="install.html#manual-x86">manual steps</a>.
+    </p>
+  </section>
+
+  <section id="what">
+    <h2><span class="slash">//</span>What is NightRun?</h2>
+    <div class="grid">
+      <div class="card"><h4>Boots from USB</h4>
+        <p>A single UEFI application started directly by the firmware — no bootloader chain, no kernel, no init system.</p></div>
+      <div class="card"><h4>Model resident in RAM</h4>
+        <p>The whole model (1.3–2.4&nbsp;GB) is copied into memory with inline CRC-32 verification; afterwards storage is sealed and never read again.</p></div>
+      <div class="card"><h4>No conventional OS</h4>
+        <p>No Linux userspace, no services, no scheduler beneath the runtime. NightRun deliberately stays on UEFI Boot Services for hardware compatibility.</p></div>
+      <div class="card"><h4>Local CPU inference</h4>
+        <p>Quantized weights (Q8_0, Q4_K, Q6_K) are used in place by hand-written AVX2 and NEON kernels — no unpacking pass, no allocations in the generation loop.</p></div>
+      <div class="card"><h4>Custom Rust runtime</h4>
+        <p><code>no_std</code> crates for tensors, tokenizer, model format, graphics and UI; the same engine code runs on the host for testing.</p></div>
+      <div class="card"><h4>Framebuffer chat</h4>
+        <p>NightRun draws its own terminal: instant message echo, a thinking cursor, streaming output, scrollback, caret editing, <code>/clear</code> and <code>/bye</code>.</p></div>
+      <div class="card"><h4>Reference-validated</h4>
+        <p>Greedy output is pinned token-for-token against llama.cpp for every supported model family, on every change.</p></div>
+      <div class="card"><h4>Two real targets</h4>
+        <p>x86_64 UEFI machines via USB, and the Raspberry&nbsp;Pi&nbsp;5 via SD card — including driving the Pi's fan, since no OS is around to do it.</p></div>
+      <div class="card"><h4>Offline by construction</h4>
+        <p>There is no network stack in the runtime. After the model loads, nothing enters or leaves the machine.</p></div>
+    </div>
+  </section>
+
+  <section id="screenshots">
+    <h2><span class="slash">//</span>The runtime, running</h2>
+    <div class="shots">
+      <figure class="wide">
+        <img src="assets/screenshots/splash.png" width="1280" height="720" loading="lazy"
+             alt="NightRun boot splash: a synthwave sunset with the NIGHTRUN wordmark, drawn by the runtime's own framebuffer code">
+        <figcaption>Boot splash — every pixel is NightRun's own code; there is no OS to borrow a compositor from.</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/screenshots/loading.png" width="1280" height="720" loading="lazy"
+             alt="Boot checklist screen: runtime init, memory scan, and the model loading into RAM with inline CRC verification">
+        <figcaption>The model streams into RAM with checksums computed inline — corrupt media fails during load, loudly.</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/screenshots/chat-typing.png" width="1280" height="720" loading="lazy"
+             alt="Chat screen with the two-line intro and a prompt being typed in the input field with a block cursor">
+        <figcaption>The chat: 8 cores online, context tracking, and a prompt mid-edit.</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/screenshots/chat-generating.png" width="1280" height="720" loading="lazy"
+             alt="Granite model streaming a reply; the status bar shows prompt throughput, first-token latency, and tokens per second">
+        <figcaption>Streaming generation with live stats: prompt 25.2&nbsp;tok/s, first token in 2.7&nbsp;s, decode 13.7&nbsp;tok/s (QEMU, 8&nbsp;cores).</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/screenshots/chat-granite.png" width="1280" height="720" loading="lazy"
+             alt="A completed Granite chat answer about a rainy city at night">
+        <figcaption>Granite 4.1 3B — the default Raspberry&nbsp;Pi&nbsp;5 model.</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/screenshots/chat-qwen.png" width="1280" height="720" loading="lazy"
+             alt="Qwen3 answering in Polish, French and German with correct accented characters">
+        <figcaption>Qwen3 4B with Unicode rendering (Latin coverage from the Spleen bitmap font).</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section id="how">
+    <h2><span class="slash">//</span>How it works</h2>
+    <ol class="flow">
+      <li>USB / SD boot <em>the firmware starts BOOTX64.EFI or BOOTAA64.EFI</em></li>
+      <li>NightRun starts <em>framebuffer, keyboard, all CPU cores as workers</em></li>
+      <li>Model loads fully into RAM <em>checksummed while streaming; storage sealed after</em></li>
+      <li>Tokenizer + KV cache initialize <em>preallocated arenas — no allocation at runtime</em></li>
+      <li>Local chat begins <em>batched prompt prefill, token-by-token decode</em></li>
+    </ol>
+    <p style="text-align:center"><a href="architecture.html">Explore the architecture →</a></p>
+  </section>
+
+  <section id="models">
+    <h2><span class="slash">//</span>Supported models</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Model</th><th>Quantization</th><th>Size</th><th>Runs on</th></tr></thead>
+        <tbody>
+          <tr><td>Llama 3.2 1B Instruct</td><td>Q8_0</td><td>1.3 GB</td><td>x86_64 · Pi 5</td></tr>
+          <tr><td>Qwen3 4B Instruct 2507</td><td>Q4_K_M</td><td>2.4 GB</td><td>x86_64 · Pi 5 (8 GB boards)</td></tr>
+          <tr><td>Granite 4.1 3B</td><td>Q4_K_M</td><td>2.0 GB</td><td>x86_64 · Pi 5</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted">
+      Granite support covers the <strong>conventional dense transformer</strong> release only —
+      hybrid (SSM/MoE) Granite variants are detected and rejected at conversion. NightRun does not
+      claim arbitrary GGUF compatibility: models pass metadata inspection, conversion validation,
+      and reference testing before joining this table.
+    </p>
+  </section>
+
+  <section id="benchmarks">
+    <h2><span class="slash">//</span>Measured performance</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Model</th><th>Quant</th><th>Prompt</th><th>Decode</th><th>Hardware</th></tr></thead>
+        <tbody>
+          <tr><td>Llama 3.2 1B</td><td>Q8_0</td><td><strong>52 tok/s</strong></td><td><strong>~20 tok/s</strong></td><td>QEMU/KVM, 8 cores, AVX2</td></tr>
+          <tr><td>Granite 4.1 3B</td><td>Q4_K_M</td><td><strong>25 tok/s</strong></td><td><strong>~13 tok/s</strong></td><td>QEMU/KVM, 8 cores, AVX2</td></tr>
+          <tr><td>Qwen3 4B</td><td>Q4_K_M</td><td><strong>21 tok/s</strong></td><td><strong>~10 tok/s</strong></td><td>QEMU/KVM, 8 cores, AVX2</td></tr>
+          <tr><td>Granite 4.1 3B</td><td>Q4_K_M</td><td><strong>6.2 tok/s</strong></td><td><strong>3.0 tok/s</strong></td><td>Raspberry Pi 5 (8 GB), 4 cores, NEON*</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted">
+      Prompt = batched prefill throughput; decode = interactive generation. All numbers are from the
+      repository's benchmark logs under stated conditions — none are projections. *The Pi figure
+      predates the ARM dot-product (sdot) kernels now in the tree. NightRun does not claim to be
+      globally faster than llama.cpp; see the
+      <a href="docs.html#benchmarks">benchmark methodology</a> for context and fair comparisons.
+    </p>
+  </section>
+
+  <section id="arch-teaser">
+    <h2><span class="slash">//</span>Under the hood</h2>
+    <ol class="flow">
+      <li>UEFI firmware</li>
+      <li>NightRun runtime <em>Rust, no_std, single EFI application</em></li>
+      <li>Model in RAM <em>zero-copy quantized tensors</em></li>
+      <li>Tokenizer + KV cache</li>
+      <li>Prefill <em>batched, bit-identical to sequential decode</em></li>
+      <li>Decode <em>AVX2 / NEON quantized matvec, all cores</em></li>
+      <li>Framebuffer chat</li>
+    </ol>
+    <p style="text-align:center"><a class="btn" href="architecture.html">Read the architecture →</a></p>
+  </section>
+
+  <section id="cta">
+    <h2><span class="slash">//</span>Build a bootable local AI appliance</h2>
+    <span class="cta">
+      <a class="btn primary" href="install.html">Install NightRun</a>
+      <a class="btn" href="architecture.html">Read the architecture</a>
+      <a class="btn" href="https://github.com/hardrave/NIGHTRUN">View the source</a>
+    </span>
+  </section>
+
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p>NightRun — code under the MIT license. Model weights are not included and remain subject to
+    their own licenses (Llama Community License; Apache-2.0 for Qwen and Granite).
+    Spleen bitmap font, BSD 2-Clause.</p>
+    <p><a href="https://github.com/hardrave/NIGHTRUN">github.com/hardrave/NIGHTRUN</a></p>
+  </div>
+</footer>
+
+<script src="js/site.js"></script>
+</body>
+</html>
