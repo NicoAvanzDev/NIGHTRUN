@@ -113,6 +113,83 @@ fn copy_into<IO: fatfs::ReadWriteSeek>(
     dst.flush().unwrap();
 }
 
+/// Build the Raspberry Pi 5 SD image: classic MBR partition table (the
+/// Pi's EEPROM bootloader convention) with one FAT32 partition holding
+/// the UEFI firmware payload (RPI_EFI.fd + config.txt, built from the
+/// pinned rpi5-uefi source — see scripts/build-rpi5-firmware.sh),
+/// EFI/BOOT/BOOTAA64.EFI and model.nrm.
+pub fn build_pi(img_path: &Path, efi: &Path, model: Option<&Path>, firmware_dir: &Path) {
+    let fw_fd = firmware_dir.join("RPI_EFI.fd");
+    let fw_cfg = firmware_dir.join("config.txt");
+    assert!(
+        fw_fd.exists() && fw_cfg.exists(),
+        "firmware payload missing ({} / config.txt) - build it first: scripts/build-rpi5-firmware.sh",
+        fw_fd.display()
+    );
+
+    let model_size = model.map(|m| std::fs::metadata(m).expect("model file").len()).unwrap_or(0);
+    let contents = model_size
+        + std::fs::metadata(efi).unwrap().len()
+        + std::fs::metadata(&fw_fd).unwrap().len();
+    let part_bytes = (contents + contents / 50 + 64 * 1024 * 1024).next_multiple_of(1024 * 1024);
+    const PART_START_LBA: u64 = 2048; // 1 MiB alignment, Pi bootloader friendly
+    let disk_bytes = PART_START_LBA * LB + part_bytes;
+
+    println!(
+        "pi image: {} ({} MB partition, model {} MB)",
+        img_path.display(),
+        part_bytes / (1024 * 1024),
+        model_size / (1024 * 1024)
+    );
+
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(img_path)
+        .expect("create image");
+    file.set_len(disk_bytes).unwrap();
+
+    // Classic MBR: one bootable partition, type 0x0C (FAT32 LBA).
+    let mut mbr = [0u8; 512];
+    let entry = &mut mbr[0x1BE..0x1BE + 16];
+    entry[0] = 0x80; // bootable
+    entry[1..4].copy_from_slice(&[0xFF, 0xFF, 0xFF]); // CHS: use LBA
+    entry[4] = 0x0C; // FAT32 LBA
+    entry[5..8].copy_from_slice(&[0xFF, 0xFF, 0xFF]);
+    entry[8..12].copy_from_slice(&u32::try_from(PART_START_LBA).unwrap().to_le_bytes());
+    entry[12..16].copy_from_slice(&u32::try_from(part_bytes / LB).unwrap().to_le_bytes());
+    mbr[510] = 0x55;
+    mbr[511] = 0xAA;
+    file.seek(SeekFrom::Start(0)).unwrap();
+    file.write_all(&mbr).unwrap();
+
+    let start = PART_START_LBA * LB;
+    let slice = fscommon::StreamSlice::new(&mut file, start, start + part_bytes).unwrap();
+    let mut buf = fscommon::BufStream::new(slice);
+    fatfs::format_volume(
+        &mut buf,
+        fatfs::FormatVolumeOptions::new().volume_label(*b"NIGHTRUN   "),
+    )
+    .expect("format fat");
+
+    let fs = fatfs::FileSystem::new(buf, fatfs::FsOptions::new()).expect("mount fat");
+    {
+        let root = fs.root_dir();
+        copy_into(&root, "RPI_EFI.fd", &fw_fd);
+        copy_into(&root, "config.txt", &fw_cfg);
+        let boot = root.create_dir("EFI").unwrap().create_dir("BOOT").unwrap();
+        copy_into(&boot, "BOOTAA64.EFI", efi);
+        if let Some(model) = model {
+            copy_into(&root, "model.nrm", model);
+        }
+    }
+    fs.unmount().expect("unmount");
+    file.flush().unwrap();
+    println!("pi image ready: {}", img_path.display());
+}
+
 /// Overwrite just the boot EFI inside an existing image (fast dev loop).
 pub fn update_efi(img_path: &Path, efi: &Path, boot_file: &str) -> bool {
     let Ok(mut file) = std::fs::OpenOptions::new().read(true).write(true).open(img_path) else {

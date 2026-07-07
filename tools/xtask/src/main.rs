@@ -29,8 +29,12 @@ fn main() {
         }
         Some("run") => run(parse_run_opts(&args[1..])),
         Some("bench") => bench(),
+        Some("pi-image") => {
+            let model = args.iter().position(|a| a == "--model").map(|i| args[i + 1].clone());
+            pi_image(model.as_deref());
+        }
         _ => {
-            eprintln!("usage: cargo xtask <build|image|run|bench> [options]");
+            eprintln!("usage: cargo xtask <build|image|run|bench|pi-image> [options]");
             std::process::exit(2);
         }
     }
@@ -119,6 +123,26 @@ fn build_image(fresh: bool, model_arg: Option<&str>, arch: Arch) -> PathBuf {
     image::build(&img, &efi, model.as_deref(), arch.boot_file());
     let _ = std::fs::write(&sidecar, stamp);
     img
+}
+
+/// Build the flashable Raspberry Pi 5 SD image (MBR + FAT32: firmware
+/// payload, BOOTAA64.EFI, model). Default model: Granite 3B (fits the
+/// 4 GB board; Qwen3 4B needs 8 GB+).
+fn pi_image(model_arg: Option<&str>) {
+    let root = root();
+    let (_, efi) = build_and_stage(Arch::Aarch64);
+    let model = root.join(model_arg.unwrap_or("models/granite-4.1-3b-q4km.nrm"));
+    let model = model.exists().then_some(model);
+    if model.is_none() {
+        println!("note: model file missing - building image without model");
+    }
+    let firmware = root.join("vendor/rpi5-uefi");
+    image::build_pi(
+        &root.join("nightrun-pi5.img"),
+        &efi,
+        model.as_deref(),
+        &firmware,
+    );
 }
 
 /// --arch flag for the simple subcommands (run parses its own).
