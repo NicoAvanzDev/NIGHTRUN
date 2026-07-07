@@ -135,6 +135,28 @@ tools/nrhost        host CLI running the same engine (debug/bench)
 tools/xtask         build / image / run / bench automation
 ```
 
+## Raspberry Pi 5 (experimental, feature/rpi5-support branch)
+
+NightRun also builds for AArch64 UEFI and targets the Raspberry Pi 5
+(4 GB+; D0 and C1 board revisions) on community EDK2 firmware compiled
+from pinned, reviewed source — see [docs/rpi5-uefi.md](docs/rpi5-uefi.md)
+for the firmware story, safety notes and bring-up checklist.
+
+```sh
+sudo apt install gcc-aarch64-linux-gnu acpica-tools uuid-dev
+rustup target add aarch64-unknown-uefi
+scripts/build-rpi5-firmware.sh        # TF-A + EDK2 from pinned source
+cargo xtask pi-image                  # nightrun-pi5.img (Granite 3B default)
+sudo dd if=nightrun-pi5.img of=/dev/sdX bs=4M status=progress oflag=direct
+```
+
+QEMU dev loop: `cargo xtask run --arch aarch64 --img [--window]` (generic
+aarch64 UEFI machine via AAVMF; TCG-emulated, so it validates correctness,
+not speed). aarch64 kernel tests: `cargo test -p nr-tensor --target
+aarch64-unknown-linux-musl` (runs under qemu-user). NEON kernels are
+bit-identical to the scalar reference; on a 4 GB Pi use Granite 3B or
+Llama 1B (Qwen3 4B needs 8 GB+).
+
 ## License
 
 Code: MIT. Fonts: [Spleen](https://github.com/fcambus/spleen) (BSD 2-Clause,

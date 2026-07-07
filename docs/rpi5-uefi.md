@@ -60,7 +60,9 @@ sudo dd if=nightrun-pi5.img of=/dev/sdX bs=4M status=progress oflag=direct
 
 Record the printed `RPI_EFI.fd` SHA-256 here after each rebuild:
 
-- (pending first build on this machine)
+- 2026-07-07, commit `ad501cf3`, gcc-aarch64-linux-gnu (Ubuntu noble):
+  - `RPI_EFI.fd` = `8136a19d07c67c4b0804eaffd7e11f4c0de90a15aec7ef11d0073d57cf9a94c6`
+  - `config.txt` = `9c34ec9c0eee9e1d7baddda1011dc1df6211c37375eb43b1e9cef05a8ead457b`
 
 ## EEPROM requirement (matched-pair rule)
 
@@ -95,3 +97,48 @@ when bring-up succeeds.
   cooling required for sustained inference (the SoC throttles at 85 °C).
 - `/bye` (UEFI shutdown) goes through PSCI; behavior on real hardware
   (power-off vs reboot) to be observed at bring-up and recorded here.
+
+## Bring-up checklist (R5 — real D0 board, run in order)
+
+Stage gates; record each result (and the UART transcript) here. Serial:
+3-pin debug UART connector, 115200 8n1.
+
+1. **EEPROM**: from Pi OS, `sudo rpi-eeprom-update` — must be 2025-06-09
+   or later (update with `-a` if older, then note the version here).
+2. **Flash**: `sudo dd if=nightrun-pi5.img of=/dev/sdX bs=4M oflag=direct status=progress && sync`.
+3. **Firmware boots**: QR screen → Pi logo + progress bar (fork firmware
+   alive). If black screen: EEPROM too old, or D0/C1 mismatch.
+4. **NightRun boots**: `[nightrun] vX.Y.Z boot layer up` on UART;
+   `[cpu] aarch64 neon baseline; dotprod=true fp16=true` expected on A76.
+5. **GOP**: synthwave splash on HDMI; note the mode
+   (`[vid] ...` serial line).
+6. **Keyboard**: any key advances the splash; typed text echoes in the
+   input bar.
+7. **Storage**: model load progress + MB/s (expect ~40-90 MB/s SDR104;
+   ~25-60 s for Granite); streaming CRC must pass.
+8. **MP services**: `[smp] N workers` — record N (4 expected). If
+   "no MP services protocol": single-core fallback works but note it.
+9. **Generation**: prompt → reply; record pp/ftl/tok/s from the status
+   bar; NEON is active by default.
+10. **Chat commands**: multi-turn, /clear, /bye (record whether PSCI
+    shutdown powers off or reboots).
+11. **Sustained bench**: 3+ long generations back-to-back with the
+    cooling noted (active cooler / heatsink / bare); record tok/s drift
+    (throttling) into docs/benchmarks.md under a "Pi 5" section.
+
+Expected decode (LPDDR4X ~10-13 GB/s usable): Llama 1B ≈ 7-9 tok/s,
+Granite 3B ≈ 4.5-6 tok/s. Numbers are recorded when measured, not before.
+
+## Merge gate status (do not merge feature/rpi5-support until all true)
+
+- [x] x86 tests + parity green after every shared change (51 tests)
+- [x] x86 benches within noise of docs/baseline-x86.md (5.8s boot / 57 tok/s pp re-measured after R1)
+- [x] aarch64 kernels bit-identical to scalar (qemu-user test rig)
+- [x] full engine e2e on aarch64 UEFI in QEMU (chat + generation)
+- [ ] x86 USB boot re-verified on real hardware
+- [ ] Pi 5 boots NightRun via UEFI (real D0 board)
+- [ ] GOP / keyboard / storage / timer / RAM load / MP verified on-device
+- [ ] ≥1 model RAM-resident generating locally on the Pi
+- [x] no Linux / host process / streamed weights anywhere in the Pi path
+- [x] firmware pins, EEPROM pair, board assumptions documented
+- [ ] Pi benchmarks with thermal conditions documented

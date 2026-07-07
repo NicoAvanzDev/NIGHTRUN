@@ -31,7 +31,7 @@ fi
 cd "$DIR"
 git fetch --quiet origin
 git checkout --quiet "$PIN"
-git submodule update --init --jobs 4
+git submodule update --init --recursive --jobs 4
 
 echo "== building TF-A + EDK2 (RELEASE, rpi5) at $PIN"
 ./build.sh --model 5
