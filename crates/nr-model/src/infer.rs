@@ -8,7 +8,7 @@
 //! to the matching format (Q8_0 or Q8_K). Single token per step; all
 //! buffers preallocated — generation never allocates.
 
-use nr_tensor::kernels::{axpy_f16, dot_f16, matvec_q8};
+use nr_tensor::kernels::{axpy_f16, dot_f16, matmul_q8, matvec_q8};
 use nr_tensor::kquant::{self, BlockQ4K, BlockQ6K, BlockQ8K, QK_K};
 use nr_tensor::q8::{self, BlockQ8_0, QK8_0};
 use nr_tensor::{f32_to_f16, rope, vec as tvec};
@@ -95,6 +95,11 @@ pub struct Weights<'m> {
     pub output: QMat<'m>,
 }
 
+/// Prompt tokens processed per batched-prefill pass. Weight rows are
+/// reused from cache across the batch, so prompt processing reads weights
+/// ~batch-fold less often than token-at-a-time decode.
+pub const MAX_BATCH: usize = 64;
+
 /// Scratch activation-quantization buffers; a matvec input is quantized
 /// into the format its weight matrix needs.
 struct Acts {
@@ -122,6 +127,93 @@ impl Acts {
                 let xk = &mut self.q8k[..cols / QK_K];
                 kquant::quantize_q8k(x, xk);
                 kquant::matvec_q6k(y, blocks, xk, rows, cols);
+            }
+        }
+    }
+
+    /// Batched: quantize `batch` activation rows (each `cols` long) and run
+    /// `w` over all of them. `y` is `[batch][rows]`. Quantization per row
+    /// uses the same functions as the decode path, so results are
+    /// bit-identical to per-token matvec.
+    fn matmul(&mut self, y: &mut [f32], w: QMat, xs: &[f32], batch: usize) {
+        let cols = xs.len() / batch;
+        let rows = y.len() / batch;
+        match w {
+            QMat::Q8(blocks) => {
+                let bpr = cols / QK8_0;
+                let xq = &mut self.q8[..batch * bpr];
+                for b in 0..batch {
+                    q8::quantize(&xs[b * cols..(b + 1) * cols], &mut xq[b * bpr..(b + 1) * bpr]);
+                }
+                matmul_q8(y, blocks, xq, rows, cols, batch);
+            }
+            QMat::Q4K(blocks) => {
+                let bpr = cols / QK_K;
+                let xk = &mut self.q8k[..batch * bpr];
+                for b in 0..batch {
+                    kquant::quantize_q8k(&xs[b * cols..(b + 1) * cols], &mut xk[b * bpr..(b + 1) * bpr]);
+                }
+                kquant::matmul_q4k(y, blocks, xk, rows, cols, batch);
+            }
+            QMat::Q6K(blocks) => {
+                let bpr = cols / QK_K;
+                let xk = &mut self.q8k[..batch * bpr];
+                for b in 0..batch {
+                    kquant::quantize_q8k(&xs[b * cols..(b + 1) * cols], &mut xk[b * bpr..(b + 1) * bpr]);
+                }
+                kquant::matmul_q6k(y, blocks, xk, rows, cols, batch);
+            }
+        }
+    }
+
+    /// Batched matmuls sharing one input; each needed activation format is
+    /// quantized exactly once.
+    fn matmul_group(&mut self, jobs: &mut [(&mut [f32], QMat)], xs: &[f32], batch: usize) {
+        let cols = xs.len() / batch;
+        let mut q8_ready = false;
+        let mut q8k_ready = false;
+        for (y, w) in jobs.iter_mut() {
+            let rows = y.len() / batch;
+            match w {
+                QMat::Q8(blocks) => {
+                    let bpr = cols / QK8_0;
+                    if !q8_ready {
+                        for b in 0..batch {
+                            q8::quantize(
+                                &xs[b * cols..(b + 1) * cols],
+                                &mut self.q8[b * bpr..(b + 1) * bpr],
+                            );
+                        }
+                        q8_ready = true;
+                    }
+                    matmul_q8(y, blocks, &self.q8[..batch * bpr], rows, cols, batch);
+                }
+                QMat::Q4K(blocks) => {
+                    let bpr = cols / QK_K;
+                    if !q8k_ready {
+                        for b in 0..batch {
+                            kquant::quantize_q8k(
+                                &xs[b * cols..(b + 1) * cols],
+                                &mut self.q8k[b * bpr..(b + 1) * bpr],
+                            );
+                        }
+                        q8k_ready = true;
+                    }
+                    kquant::matmul_q4k(y, blocks, &self.q8k[..batch * bpr], rows, cols, batch);
+                }
+                QMat::Q6K(blocks) => {
+                    let bpr = cols / QK_K;
+                    if !q8k_ready {
+                        for b in 0..batch {
+                            kquant::quantize_q8k(
+                                &xs[b * cols..(b + 1) * cols],
+                                &mut self.q8k[b * bpr..(b + 1) * bpr],
+                            );
+                        }
+                        q8k_ready = true;
+                    }
+                    kquant::matmul_q6k(y, blocks, &self.q8k[..batch * bpr], rows, cols, batch);
+                }
             }
         }
     }
@@ -184,6 +276,15 @@ pub struct InferCtx<'m> {
     up: &'static mut [f32],
     logits: &'static mut [f32],
     acts: Acts,
+    // Batched-prefill scratch, [MAX_BATCH][*]; reuses `att`/`logits`.
+    bx: &'static mut [f32],
+    bxb: &'static mut [f32],
+    bq: &'static mut [f32],
+    battn: &'static mut [f32],
+    bk: &'static mut [f32],
+    bv: &'static mut [f32],
+    bgate: &'static mut [f32],
+    bup: &'static mut [f32],
     /// f16 bits, [n_layers][ctx][kv_dim].
     key_cache: &'static mut [u16],
     val_cache: &'static mut [u16],
@@ -226,10 +327,12 @@ impl<'m> InferCtx<'m> {
         let maxd = d.dim.max(d.att_dim).max(d.ffn_dim);
         let f32s = d.dim * 3 + d.att_dim * 2 + d.kv_dim * 2 + d.n_heads * ctx
             + d.ffn_dim * 2 + d.vocab + d.head_dim / 2;
-        let acts = maxd / QK8_0 * core::mem::size_of::<BlockQ8_0>()
-            + maxd / QK_K * core::mem::size_of::<BlockQ8K>();
+        let batch_f32s = MAX_BATCH * (d.dim * 2 + d.att_dim * 2 + d.kv_dim * 2 + d.ffn_dim * 2);
+        let acts = MAX_BATCH
+            * (maxd / QK8_0 * core::mem::size_of::<BlockQ8_0>()
+                + maxd / QK_K * core::mem::size_of::<BlockQ8K>());
         let kv = 2 * d.n_layers * ctx * d.kv_dim * 2;
-        f32s * 4 + acts + kv + 64 * 32 // alignment slack
+        (f32s + batch_f32s) * 4 + acts + kv + 64 * 40 // alignment slack
     }
 
     pub fn new(model: &'m Model<'m>, ctx: usize, alloc: AllocFn) -> Result<InferCtx<'m>, ParseError> {
@@ -338,7 +441,18 @@ impl<'m> InferCtx<'m> {
             gate: take(alloc, dims.ffn_dim),
             up: take(alloc, dims.ffn_dim),
             logits: take(alloc, dims.vocab),
-            acts: Acts { q8: take(alloc, maxd / QK8_0), q8k: take(alloc, maxd / QK_K) },
+            acts: Acts {
+                q8: take(alloc, MAX_BATCH * (maxd / QK8_0)),
+                q8k: take(alloc, MAX_BATCH * (maxd / QK_K)),
+            },
+            bx: take(alloc, MAX_BATCH * dims.dim),
+            bxb: take(alloc, MAX_BATCH * dims.dim.max(dims.att_dim)),
+            bq: take(alloc, MAX_BATCH * dims.att_dim),
+            battn: take(alloc, MAX_BATCH * dims.att_dim),
+            bk: take(alloc, MAX_BATCH * dims.kv_dim),
+            bv: take(alloc, MAX_BATCH * dims.kv_dim),
+            bgate: take(alloc, MAX_BATCH * dims.ffn_dim),
+            bup: take(alloc, MAX_BATCH * dims.ffn_dim),
             key_cache: take(alloc, dims.n_layers * ctx * dims.kv_dim),
             val_cache: take(alloc, dims.n_layers * ctx * dims.kv_dim),
             dims,
@@ -444,6 +558,170 @@ impl<'m> InferCtx<'m> {
         }
 
         self.pos += 1;
+        self.logits
+    }
+
+    /// Batched prefill of up to MAX_BATCH prompt tokens. Numerically
+    /// bit-identical to calling `forward` per token (same kernels, same
+    /// order); returns the logits of the last token.
+    pub fn prefill_chunk(&mut self, tokens: &[u32]) -> &[f32] {
+        let d = self.dims;
+        let b = tokens.len();
+        assert!(b >= 1 && b <= MAX_BATCH);
+        assert!(self.pos + b <= d.ctx, "context window exhausted");
+        let base = self.pos;
+
+        // Embeddings (+ muP embed scale) per row.
+        for (i, &t) in tokens.iter().enumerate() {
+            let row = &mut self.bx[i * d.dim..(i + 1) * d.dim];
+            self.weights.embed.dequant_row(t as usize, d.dim, row);
+            if self.embed_scale != 1.0 {
+                tvec::scale_inplace(row, self.embed_scale);
+            }
+        }
+
+        for l in 0..d.n_layers {
+            let w = &self.weights.layers[l];
+
+            // Attention block: batched norm + QKV.
+            for i in 0..b {
+                tvec::rmsnorm(
+                    &mut self.bxb[i * d.dim..(i + 1) * d.dim],
+                    &self.bx[i * d.dim..(i + 1) * d.dim],
+                    w.attn_norm,
+                    self.norm_eps,
+                );
+            }
+            self.acts.matmul_group(
+                &mut [
+                    (&mut self.bq[..b * d.att_dim], w.wq),
+                    (&mut self.bk[..b * d.kv_dim], w.wk),
+                    (&mut self.bv[..b * d.kv_dim], w.wv),
+                ],
+                &self.bxb[..b * d.dim],
+                b,
+            );
+
+            // Per token: qk-norm, rope at its own position, KV append.
+            for i in 0..b {
+                let pos = base + i;
+                let q = &mut self.bq[i * d.att_dim..(i + 1) * d.att_dim];
+                let k = &mut self.bk[i * d.kv_dim..(i + 1) * d.kv_dim];
+                if let (Some(qn), Some(kn)) = (w.q_norm, w.k_norm) {
+                    for head in q.chunks_exact_mut(d.head_dim) {
+                        tvec::rmsnorm_inplace(head, qn, self.norm_eps);
+                    }
+                    for head in k.chunks_exact_mut(d.head_dim) {
+                        tvec::rmsnorm_inplace(head, kn, self.norm_eps);
+                    }
+                }
+                rope::apply(q, d.head_dim, self.freqs, pos, self.rope_style);
+                rope::apply(k, d.head_dim, self.freqs, pos, self.rope_style);
+                let cache_row = (l * d.ctx + pos) * d.kv_dim;
+                for j in 0..d.kv_dim {
+                    self.key_cache[cache_row + j] = f32_to_f16(k[j]);
+                    self.val_cache[cache_row + j] =
+                        f32_to_f16(self.bv[i * d.kv_dim + j]);
+                }
+            }
+
+            // Causal attention per token: token i sees positions 0..=base+i
+            // only (later batch tokens' cache rows are beyond its window).
+            let gqa = d.n_heads / d.n_kv_heads;
+            let scale = self.att_score_scale;
+            for i in 0..b {
+                let pos = base + i;
+                for h in 0..d.n_heads {
+                    let qh = &self.bq[i * d.att_dim + h * d.head_dim
+                        ..i * d.att_dim + (h + 1) * d.head_dim];
+                    let kvh = (h / gqa) * d.head_dim;
+                    let att = &mut self.att[h * d.ctx..h * d.ctx + pos + 1];
+                    for (t, a) in att.iter_mut().enumerate() {
+                        let krow = (l * d.ctx + t) * d.kv_dim + kvh;
+                        *a = dot_f16(&self.key_cache[krow..krow + d.head_dim], qh) * scale;
+                    }
+                    tvec::softmax(att);
+                    let out = &mut self.battn[i * d.att_dim + h * d.head_dim
+                        ..i * d.att_dim + (h + 1) * d.head_dim];
+                    out.fill(0.0);
+                    for (t, &a) in att.iter().enumerate() {
+                        let vrow = (l * d.ctx + t) * d.kv_dim + kvh;
+                        axpy_f16(out, a, &self.val_cache[vrow..vrow + d.head_dim]);
+                    }
+                }
+            }
+
+            // Batched output projection + residual.
+            self.acts.matmul(
+                &mut self.bxb[..b * d.dim],
+                w.wo,
+                &self.battn[..b * d.att_dim],
+                b,
+            );
+            for i in 0..b {
+                tvec::saxpy(
+                    &mut self.bx[i * d.dim..(i + 1) * d.dim],
+                    self.residual_scale,
+                    &self.bxb[i * d.dim..(i + 1) * d.dim],
+                );
+            }
+
+            // MLP block: batched norm, gate/up, swiglu rows, down, residual.
+            for i in 0..b {
+                tvec::rmsnorm(
+                    &mut self.bxb[i * d.dim..(i + 1) * d.dim],
+                    &self.bx[i * d.dim..(i + 1) * d.dim],
+                    w.ffn_norm,
+                    self.norm_eps,
+                );
+            }
+            self.acts.matmul_group(
+                &mut [
+                    (&mut self.bgate[..b * d.ffn_dim], w.w_gate),
+                    (&mut self.bup[..b * d.ffn_dim], w.w_up),
+                ],
+                &self.bxb[..b * d.dim],
+                b,
+            );
+            for i in 0..b {
+                tvec::swiglu(
+                    &mut self.bgate[i * d.ffn_dim..(i + 1) * d.ffn_dim],
+                    &self.bup[i * d.ffn_dim..(i + 1) * d.ffn_dim],
+                );
+            }
+            self.acts.matmul(
+                &mut self.bxb[..b * d.dim],
+                w.w_down,
+                &self.bgate[..b * d.ffn_dim],
+                b,
+            );
+            for i in 0..b {
+                tvec::saxpy(
+                    &mut self.bx[i * d.dim..(i + 1) * d.dim],
+                    self.residual_scale,
+                    &self.bxb[i * d.dim..(i + 1) * d.dim],
+                );
+            }
+        }
+
+        // Only the last token's logits are needed.
+        let last = &self.bx[(b - 1) * d.dim..b * d.dim];
+        tvec::rmsnorm(self.xb, last, self.weights.out_norm, self.norm_eps);
+        self.acts.matvec(self.logits, self.weights.output, self.xb);
+        if self.logit_recip != 1.0 {
+            tvec::scale_inplace(self.logits, self.logit_recip);
+        }
+
+        self.pos += b;
+        self.logits
+    }
+
+    /// Prefill an arbitrary-length prompt in MAX_BATCH chunks.
+    pub fn prefill(&mut self, tokens: &[u32]) -> &[f32] {
+        assert!(!tokens.is_empty());
+        for chunk in tokens.chunks(MAX_BATCH) {
+            self.prefill_chunk(chunk);
+        }
         self.logits
     }
 }

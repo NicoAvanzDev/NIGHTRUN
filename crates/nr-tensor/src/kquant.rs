@@ -286,6 +286,138 @@ pub unsafe fn dot_q4k_avx2(w: &[BlockQ4K], x: &[BlockQ8K]) -> f32 {
     hsum256(acc) - acc_min
 }
 
+/// 4-wide Q4_K dot: one pass over the weight row serves four activation
+/// vectors, sharing weight loads and scale unpacking. Each lane accumulates
+/// its blocks in the same order as [`dot_q4k_avx2`], so per-token results
+/// are bit-identical to the 1-wide kernel.
+///
+/// # Safety
+/// Caller must ensure AVX2+FMA are supported and YMM state is enabled.
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn dot_q4k_avx2_x4(w: &[BlockQ4K], xs: [&[BlockQ8K]; 4]) -> [f32; 4] {
+    use core::arch::x86_64::*;
+
+    let m4 = _mm256_set1_epi8(0x0F);
+    let mut acc = [_mm256_setzero_ps(); 4];
+    let mut acc_min = [0f32; 4];
+
+    for (bi, bw) in w.iter().enumerate() {
+        let d_w = f16_to_f32(bw.d);
+        let dmin_w = f16_to_f32(bw.dmin);
+        let scales_raw = bw.scales;
+        let mut sc = [0u8; 8];
+        let mut mins = [0u8; 8];
+        for j in 0..8 {
+            let (s, m) = q4k_scale_min(&scales_raw, j);
+            sc[j] = s;
+            mins[j] = m;
+        }
+        for lane in 0..4 {
+            let bx = &xs[lane][bi];
+            let mut min_sum = 0i32;
+            for j in 0..8 {
+                min_sum += mins[j] as i32 * (bx.bsums[2 * j] as i32 + bx.bsums[2 * j + 1] as i32);
+            }
+            acc_min[lane] += dmin_w * bx.d * min_sum as f32;
+        }
+
+        let qs_ptr = bw.qs.as_ptr();
+        let mut sumi = [_mm256_setzero_si256(); 4];
+        for j in 0..4 {
+            let q4bits = _mm256_loadu_si256(qs_ptr.add(j * 32) as *const __m256i);
+            let q4l = _mm256_and_si256(q4bits, m4);
+            let q4h = _mm256_and_si256(_mm256_srli_epi16(q4bits, 4), m4);
+            let scale_l = _mm256_set1_epi16(sc[2 * j] as i16);
+            let scale_h = _mm256_set1_epi16(sc[2 * j + 1] as i16);
+            for lane in 0..4 {
+                let q8_ptr = xs[lane][bi].qs.as_ptr();
+                let q8l = _mm256_loadu_si256(q8_ptr.add(j * 64) as *const __m256i);
+                let q8h = _mm256_loadu_si256(q8_ptr.add(j * 64 + 32) as *const __m256i);
+                let mut p16l = _mm256_maddubs_epi16(q4l, q8l);
+                p16l = _mm256_madd_epi16(scale_l, p16l);
+                let mut p16h = _mm256_maddubs_epi16(q4h, q8h);
+                p16h = _mm256_madd_epi16(scale_h, p16h);
+                sumi[lane] = _mm256_add_epi32(sumi[lane], _mm256_add_epi32(p16l, p16h));
+            }
+        }
+        for lane in 0..4 {
+            let d = _mm256_set1_ps(d_w * xs[lane][bi].d);
+            acc[lane] = _mm256_fmadd_ps(d, _mm256_cvtepi32_ps(sumi[lane]), acc[lane]);
+        }
+    }
+    [
+        hsum256(acc[0]) - acc_min[0],
+        hsum256(acc[1]) - acc_min[1],
+        hsum256(acc[2]) - acc_min[2],
+        hsum256(acc[3]) - acc_min[3],
+    ]
+}
+
+/// 4-wide Q6_K dot (see [`dot_q4k_avx2_x4`]); bit-identical per lane to
+/// [`dot_q6k_avx2`].
+///
+/// # Safety
+/// Caller must ensure AVX2+FMA are supported and YMM state is enabled.
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn dot_q6k_avx2_x4(w: &[BlockQ6K], xs: [&[BlockQ8K]; 4]) -> [f32; 4] {
+    use core::arch::x86_64::*;
+
+    let m4 = _mm256_set1_epi8(0x0F);
+    let m2 = _mm256_set1_epi8(3);
+    let m32s = _mm256_set1_epi8(32);
+    let mut acc = [_mm256_setzero_ps(); 4];
+
+    for (bi, bw) in w.iter().enumerate() {
+        let d_w = f16_to_f32(bw.d);
+        let scales = bw.scales;
+        let mut sumi = [_mm256_setzero_si256(); 4];
+
+        for half in 0..2 {
+            let ql_ptr = bw.ql.as_ptr().add(half * 64);
+            let qh_ptr = bw.qh.as_ptr().add(half * 32);
+            let sc = &scales[half * 8..half * 8 + 8];
+
+            let scale = |g: usize| -> __m256i {
+                _mm256_set_m128i(_mm_set1_epi16(sc[g + 1] as i16), _mm_set1_epi16(sc[g] as i16))
+            };
+
+            let q4bits1 = _mm256_loadu_si256(ql_ptr as *const __m256i);
+            let q4bits2 = _mm256_loadu_si256(ql_ptr.add(32) as *const __m256i);
+            let qhbits = _mm256_loadu_si256(qh_ptr as *const __m256i);
+
+            let q4h_0 = _mm256_slli_epi16(_mm256_and_si256(qhbits, m2), 4);
+            let q4h_1 = _mm256_slli_epi16(_mm256_and_si256(_mm256_srli_epi16(qhbits, 2), m2), 4);
+            let q4h_2 = _mm256_slli_epi16(_mm256_and_si256(_mm256_srli_epi16(qhbits, 4), m2), 4);
+            let q4h_3 = _mm256_slli_epi16(_mm256_and_si256(_mm256_srli_epi16(qhbits, 6), m2), 4);
+
+            let q6 = [
+                _mm256_or_si256(_mm256_and_si256(q4bits1, m4), q4h_0),
+                _mm256_or_si256(_mm256_and_si256(q4bits2, m4), q4h_1),
+                _mm256_or_si256(_mm256_and_si256(_mm256_srli_epi16(q4bits1, 4), m4), q4h_2),
+                _mm256_or_si256(_mm256_and_si256(_mm256_srli_epi16(q4bits2, 4), m4), q4h_3),
+            ];
+
+            for (n, &q6n) in q6.iter().enumerate() {
+                let sc_vec = scale(2 * n);
+                for lane in 0..4 {
+                    let q8_ptr = xs[lane][bi].qs.as_ptr().add(half * 128);
+                    let q8 = _mm256_loadu_si256(q8_ptr.add(n * 32) as *const __m256i);
+                    let corr = _mm256_maddubs_epi16(m32s, q8);
+                    let mut p16 = _mm256_maddubs_epi16(q6n, q8);
+                    p16 = _mm256_sub_epi16(p16, corr);
+                    p16 = _mm256_madd_epi16(sc_vec, p16);
+                    sumi[lane] = _mm256_add_epi32(sumi[lane], p16);
+                }
+            }
+        }
+        for lane in 0..4 {
+            let d = _mm256_set1_ps(d_w * xs[lane][bi].d);
+            acc[lane] = _mm256_fmadd_ps(d, _mm256_cvtepi32_ps(sumi[lane]), acc[lane]);
+        }
+    }
+    [hsum256(acc[0]), hsum256(acc[1]), hsum256(acc[2]), hsum256(acc[3])]
+}
+
 /// # Safety
 /// Caller must ensure AVX2+FMA are supported and YMM state is enabled.
 #[target_feature(enable = "avx2,fma")]
@@ -396,6 +528,66 @@ macro_rules! kquant_matvec {
 
 kquant_matvec!(matvec_q4k, BlockQ4K, dot_q4k_scalar, dot_q4k_avx2);
 kquant_matvec!(matvec_q6k, BlockQ6K, dot_q6k_scalar, dot_q6k_avx2);
+
+macro_rules! kquant_matmul {
+    ($name:ident, $block:ty, $scalar:ident, $avx2:ident, $avx2_x4:ident) => {
+        /// Batched matvec: y[b][r] = dot(w[r, :], xs[b]); bit-identical to
+        /// per-token matvec, with the weight row reused across the batch.
+        pub fn $name(
+            y: &mut [f32],
+            w: &[$block],
+            xs: &[BlockQ8K],
+            rows: usize,
+            cols: usize,
+            batch: usize,
+        ) {
+            let bpr = cols / QK_K;
+            assert_eq!(y.len(), batch * rows);
+            assert_eq!(xs.len(), batch * bpr);
+            assert!(w.len() >= rows * bpr);
+            let fast = crate::cpu::fast_path();
+            let yp = SendPtr(y.as_mut_ptr());
+            crate::parallel::POOL.run(rows, &|r0, r1| {
+                for r in r0..r1 {
+                    let row = &w[r * bpr..(r + 1) * bpr];
+                    let mut b = 0;
+                    // 4-wide tiles share weight loads + scale unpacking.
+                    while fast && b + 4 <= batch {
+                        let vs = unsafe {
+                            // SAFETY: fast_path() verified AVX2+FMA+YMM.
+                            $avx2_x4(row, [
+                                &xs[b * bpr..(b + 1) * bpr],
+                                &xs[(b + 1) * bpr..(b + 2) * bpr],
+                                &xs[(b + 2) * bpr..(b + 3) * bpr],
+                                &xs[(b + 3) * bpr..(b + 4) * bpr],
+                            ])
+                        };
+                        for (i, v) in vs.into_iter().enumerate() {
+                            // SAFETY: rows disjoint per worker; each (b, r) once.
+                            unsafe { yp.get().add((b + i) * rows + r).write(v) };
+                        }
+                        b += 4;
+                    }
+                    while b < batch {
+                        let x = &xs[b * bpr..(b + 1) * bpr];
+                        let v = if fast {
+                            // SAFETY: fast_path() verified AVX2+FMA+YMM.
+                            unsafe { $avx2(row, x) }
+                        } else {
+                            $scalar(row, x)
+                        };
+                        // SAFETY: rows disjoint per worker; each (b, r) once.
+                        unsafe { yp.get().add(b * rows + r).write(v) };
+                        b += 1;
+                    }
+                }
+            });
+        }
+    };
+}
+
+kquant_matmul!(matmul_q4k, BlockQ4K, dot_q4k_scalar, dot_q4k_avx2, dot_q4k_avx2_x4);
+kquant_matmul!(matmul_q6k, BlockQ6K, dot_q6k_scalar, dot_q6k_avx2, dot_q6k_avx2_x4);
 
 // ---- Test-support quantizers (host reference; converter uses GGUF bytes) --
 

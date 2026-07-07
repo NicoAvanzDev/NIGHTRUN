@@ -261,3 +261,20 @@ fn bench_matvec() {
         dts.as_secs_f64() / scalar_reps as f64 / (dt.as_secs_f64() / reps as f64)
     );
 }
+
+#[test]
+fn matmul_q8_bit_equals_matvec() {
+    let mut rng = Rng(202);
+    let (rows, cols, batch) = (48, 256, 4);
+    let w = quantized(&rng.vec(rows * cols));
+    let xs = quantized(&rng.vec(batch * cols));
+    let bpr = cols / QK8_0;
+
+    let mut ym = vec![0f32; batch * rows];
+    nr_tensor::kernels::matmul_q8(&mut ym, &w, &xs, rows, cols, batch);
+    for b in 0..batch {
+        let mut yv = vec![0f32; rows];
+        matvec_q8(&mut yv, &w, &xs[b * bpr..(b + 1) * bpr], rows, cols);
+        assert_eq!(&ym[b * rows..(b + 1) * rows], &yv[..], "batch {b}");
+    }
+}

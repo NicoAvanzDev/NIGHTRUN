@@ -39,10 +39,7 @@ fn greedy_in(model_file: &str, prompt: &str, n: usize, chat: bool) -> Option<Str
         }
         tok.encode_text(prompt, &mut ids);
     }
-    let mut logits: &[f32] = &[];
-    for &id in &ids {
-        logits = ctx.forward(id);
-    }
+    let mut logits: &[f32] = ctx.prefill(&ids);
     let mut out = Vec::new();
     for _ in 0..n {
         let next = nr_tensor::vec::argmax(logits) as u32;

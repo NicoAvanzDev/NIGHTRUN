@@ -345,17 +345,14 @@ fn generate(
 
     turns.push(Turn { role: Role::Llama, text: String::new() });
 
-    // Prefill. Redraw between tokens so the UI shows life.
+    // Batched prefill; redraw between chunks so the UI shows life.
     let t0 = p.clock.now();
-    let mut logits_ready = false;
-    for (i, &id) in ids.iter().enumerate() {
-        p.infer.forward(id);
-        logits_ready = true;
-        if i % 4 == 0 {
-            draw_chat(p, surf, turns, "", frame, 0, true, 0);
-            frame = frame.wrapping_add(1);
-        }
-        if p.infer.remaining() == 0 {
+    for chunk in ids.chunks(nr_model::infer::MAX_BATCH) {
+        p.infer.prefill_chunk(chunk);
+        draw_chat(p, surf, turns, "", frame, 0, true, 0);
+        frame = frame.wrapping_add(1);
+        if matches!(input::poll(), Some(InputEvent::Escape)) {
+            serial_println!("[gen] prefill interrupted");
             break;
         }
     }
@@ -368,7 +365,6 @@ fn generate(
         prefill_ms,
         ids.len() as u64 * 1000 / prefill_ms.max(1)
     );
-    let _ = logits_ready;
 
     // Generation loop.
     let t0 = p.clock.now();

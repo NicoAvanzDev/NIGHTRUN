@@ -251,3 +251,29 @@ fn q6k_dot_matches_dequant_reference() {
         );
     }
 }
+
+/// Batched matmul must be bit-identical to per-token matvec (same dots,
+/// same order — this equality is what makes batched prefill safe).
+#[test]
+fn matmul_bit_equals_matvec() {
+    let mut rng = Rng(101);
+    let (rows, cols, batch) = (32, 512, 5);
+    let w4: Vec<_> = rng.vec(rows * cols).chunks_exact(QK_K).map(quantize_q4k_ref).collect();
+    let w6: Vec<_> = rng.vec(rows * cols).chunks_exact(QK_K).map(quantize_q6k_ref).collect();
+    let xs = q8k(&rng.vec(batch * cols));
+    let bpr = cols / QK_K;
+
+    let mut ym4 = vec![0f32; batch * rows];
+    kquant::matmul_q4k(&mut ym4, &w4, &xs, rows, cols, batch);
+    let mut ym6 = vec![0f32; batch * rows];
+    kquant::matmul_q6k(&mut ym6, &w6, &xs, rows, cols, batch);
+
+    for b in 0..batch {
+        let x = &xs[b * bpr..(b + 1) * bpr];
+        let mut yv = vec![0f32; rows];
+        kquant::matvec_q4k(&mut yv, &w4, x, rows, cols);
+        assert_eq!(&ym4[b * rows..(b + 1) * rows], &yv[..], "q4k batch {b}");
+        kquant::matvec_q6k(&mut yv, &w6, x, rows, cols);
+        assert_eq!(&ym6[b * rows..(b + 1) * rows], &yv[..], "q6k batch {b}");
+    }
+}

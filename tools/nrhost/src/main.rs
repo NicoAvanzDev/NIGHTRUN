@@ -18,6 +18,7 @@ fn main() {
     let mut top_p = 0.9f32;
     let mut raw = false;
     let mut debug_gap = false;
+    let mut batch = nr_model::infer::MAX_BATCH;
     let mut ctx = 4096usize;
     let mut seed = 0x5eed_cafe_u64;
     let mut threads = 1usize;
@@ -32,6 +33,7 @@ fn main() {
             "--seed" => seed = args.next().unwrap().parse().unwrap(),
             "--raw" => raw = true,
             "--debug-gap" => debug_gap = true,
+            "--batch" => batch = args.next().unwrap().parse().unwrap(),
             other => panic!("unknown arg {other}"),
         }
     }
@@ -83,15 +85,21 @@ fn main() {
     }
     eprintln!("prompt tokens: {ids:?}");
 
-    // Prefill.
+    // Prefill (batched by default; --batch 1 forces the decode path).
     let t0 = std::time::Instant::now();
     let mut logits: &[f32] = &[];
-    for &id in &ids {
-        logits = ictx.forward(id);
+    if batch <= 1 {
+        for &id in &ids {
+            logits = ictx.forward(id);
+        }
+    } else {
+        for chunk in ids.chunks(batch.min(nr_model::infer::MAX_BATCH)) {
+            logits = ictx.prefill_chunk(chunk);
+        }
     }
     let prefill = t0.elapsed();
     eprintln!(
-        "prefill: {} tokens in {:.2}s ({:.2} tok/s)",
+        "prefill (batch {batch}): {} tokens in {:.2}s ({:.2} tok/s)",
         ids.len(),
         prefill.as_secs_f64(),
         ids.len() as f64 / prefill.as_secs_f64()
