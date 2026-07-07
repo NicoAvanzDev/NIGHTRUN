@@ -39,24 +39,27 @@
   </div>
 
   <nav aria-label="Table of contents">
-    <div class="grid toc-grid">
-      <a class="card toc-card" href="#start"><h4>1 · Getting started</h4><p>From clone to chat, and how to use the chat itself.</p></a>
-      <a class="card toc-card" href="#commands"><h4>2 · Command reference</h4><p>Every real command: installer, xtask, converter, host runner, tests.</p></a>
-      <a class="card toc-card" href="#models"><h4>3 · Model support</h4><p>Families, quantizations, the catalog manifest, adding models.</p></a>
-      <a class="card toc-card" href="#nrm"><h4>4 · The .nrm format</h4><p>Header, tensor table, tokenizer payload, integrity design.</p></a>
-      <a class="card toc-card" href="#forge"><h4>5 · Installer / Image Forge</h4><p>Safety rules, verification, secrets policy, debug mode.</p></a>
-      <a class="card toc-card" href="#tokenizer"><h4>6 · Tokenizer &amp; templates</h4><p>Why exact parity matters and how it is tested.</p></a>
-      <a class="card toc-card" href="#dev"><h4>7 · Developing &amp; testing</h4><p>The QEMU dev loop, test suites, parity methodology.</p></a>
-      <a class="card toc-card" href="#benchmarks"><h4>8 · Benchmarks</h4><p>Methodology, measured tables, context-length effects.</p></a>
-      <a class="card toc-card" href="#troubleshooting"><h4>9 · Troubleshooting</h4><p>Symptoms → concrete actions, both targets.</p></a>
-      <a class="card toc-card" href="#limits"><h4>10 · Limitations</h4><p>What NightRun deliberately is not.</p></a>
-      <a class="card toc-card" href="#roadmap"><h4>11 · Roadmap</h4><p>In validation vs exploration — no promises.</p></a>
-      <a class="card toc-card" href="#source"><h4>12 · Source</h4><p>Repository map and the contribution contract.</p></a>
+    <div class="toc-panel">
+      <p class="toc-title">On this page</p>
+      <ol>
+        <li><a href="#start">Getting started</a></li>
+        <li><a href="#commands">Command reference</a></li>
+        <li><a href="#models">Model support &amp; manifests</a></li>
+        <li><a href="#nrm">The .nrm format</a></li>
+        <li><a href="#forge">Installer / Image Forge</a></li>
+        <li><a href="#tokenizer">Tokenizer &amp; templates</a></li>
+        <li><a href="#dev">Developing &amp; testing</a></li>
+        <li><a href="#benchmarks">Benchmark methodology</a></li>
+        <li><a href="#troubleshooting">Troubleshooting</a></li>
+        <li><a href="#limits">Limitations &amp; non-goals</a></li>
+        <li><a href="#roadmap">Roadmap</a></li>
+        <li><a href="#source">Source &amp; contributing</a></li>
+      </ol>
     </div>
   </nav>
 
   <section id="start">
-    <h2><span class="slash">//</span>1 · Getting started</h2>
+    <h2><span class="secnum">01</span>Getting started</h2>
     <pre data-copy><code>git clone https://github.com/hardrave/NIGHTRUN.git
 cd NIGHTRUN
 ./install.sh</code></pre>
@@ -88,7 +91,7 @@ cd NIGHTRUN
   </section>
 
   <section id="commands">
-    <h2><span class="slash">//</span>2 · Command reference</h2>
+    <h2><span class="secnum">02</span>Command reference</h2>
 
     <h3>Installer</h3>
     <pre data-copy><code>./install.sh                          <span class="c"># the guided flow (see section 5)</span>
@@ -146,7 +149,7 @@ scripts/build-rpi5-firmware.sh                          <span class="c"># Pi UEF
   </section>
 
   <section id="models">
-    <h2><span class="slash">//</span>3 · Model support and manifests</h2>
+    <h2><span class="secnum">03</span>Model support and manifests</h2>
     <h3>Supported today</h3>
     <div class="tablewrap">
       <table>
@@ -189,7 +192,7 @@ scripts/installer/tests/run.sh</code></pre>
   </section>
 
   <section id="nrm">
-    <h2><span class="slash">//</span>4 · The .nrm format</h2>
+    <h2><span class="secnum">04</span>The .nrm format</h2>
     <p>NightRun's runtime format (version 3), designed so that loading is the last copy ever made:</p>
     <h3>Layout</h3>
     <div class="tablewrap">
@@ -215,7 +218,7 @@ scripts/installer/tests/run.sh</code></pre>
   </section>
 
   <section id="forge">
-    <h2><span class="slash">//</span>5 · Installer / Image Forge reference</h2>
+    <h2><span class="secnum">05</span>Installer / Image Forge reference</h2>
     <p>Full text: <a href="https://github.com/hardrave/NIGHTRUN/blob/master/docs/installer.md">docs/installer.md</a>. The rules that matter:</p>
     <h3>Device safety</h3>
     <ul class="plain">
@@ -250,7 +253,7 @@ scripts/installer/tests/run.sh</code></pre>
   </section>
 
   <section id="tokenizer">
-    <h2><span class="slash">//</span>6 · Tokenizer and template reference</h2>
+    <h2><span class="secnum">06</span>Tokenizer and template reference</h2>
     <p>
       A model that loads perfectly but tokenizes almost-correctly produces subtly wrong output —
       the least debuggable failure mode there is. NightRun pins tokenization as hard as it pins
@@ -270,7 +273,7 @@ scripts/installer/tests/run.sh</code></pre>
   </section>
 
   <section id="dev">
-    <h2><span class="slash">//</span>7 · Developing and testing</h2>
+    <h2><span class="secnum">07</span>Developing and testing</h2>
     <h3>The development loop</h3>
     <pre data-copy><code>cargo test                       <span class="c"># engine correctness on the host - seconds</span>
 cargo run --release -p nrhost -- models/model.nrm --prompt "..."   <span class="c"># same engine, host speed</span>
@@ -290,7 +293,7 @@ cargo xtask run --img --window   <span class="c"># full boot in QEMU when platfo
   </section>
 
   <section id="benchmarks">
-    <h2><span class="slash">//</span>8 · Benchmark methodology</h2>
+    <h2><span class="secnum">08</span>Benchmark methodology</h2>
     <p>Four numbers answer four different questions:</p>
     <ul class="plain">
       <li><strong>Prompt throughput (pp)</strong> — batched prefill speed; dominates time-to-first-token for long prompts;</li>
@@ -328,7 +331,7 @@ cargo xtask run --img --window   <span class="c"># full boot in QEMU when platfo
   </section>
 
   <section id="troubleshooting">
-    <h2><span class="slash">//</span>9 · Troubleshooting</h2>
+    <h2><span class="secnum">09</span>Troubleshooting</h2>
     <div class="tablewrap">
       <table>
         <thead><tr><th>Symptom</th><th>Action</th></tr></thead>
@@ -354,7 +357,7 @@ cargo xtask run --img --window   <span class="c"># full boot in QEMU when platfo
   </section>
 
   <section id="limits">
-    <h2><span class="slash">//</span>10 · Limitations and non-goals</h2>
+    <h2><span class="secnum">10</span>Limitations and non-goals</h2>
     <ul class="plain">
       <li><strong>Not a general-purpose OS</strong> — no desktop, no applications, no networking. A single-purpose chat appliance, on purpose.</li>
       <li><strong>Three architecture families</strong>, individually validated. No arbitrary GGUF compatibility; hybrid Granite variants are out of scope by design.</li>
@@ -368,7 +371,7 @@ cargo xtask run --img --window   <span class="c"># full boot in QEMU when platfo
   </section>
 
   <section id="roadmap">
-    <h2><span class="slash">//</span>11 · Roadmap</h2>
+    <h2><span class="secnum">11</span>Roadmap</h2>
     <p class="muted">Working notes, honestly labeled — not commitments.</p>
     <ul class="plain">
       <li><strong>In validation:</strong> Raspberry Pi 5 benchmarks with the sdot NEON kernels; sustained-load thermal runs with the fan driver.</li>
@@ -378,7 +381,7 @@ cargo xtask run --img --window   <span class="c"># full boot in QEMU when platfo
   </section>
 
   <section id="source">
-    <h2><span class="slash">//</span>12 · Source and contributing</h2>
+    <h2><span class="secnum">12</span>Source and contributing</h2>
     <pre><code>crates/nr-boot      <span class="c">UEFI entry, video, input, model load, SMP, fan, app shell</span>
 crates/nr-gfx       <span class="c">framebuffer, PSF fonts, drawing, theme</span>
 crates/nr-ui        <span class="c">splash / loading / chat screens</span>

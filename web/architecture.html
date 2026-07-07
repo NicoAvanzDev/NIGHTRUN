@@ -39,7 +39,7 @@
   </div>
 
   <section id="overview">
-    <h2><span class="slash">//</span>1 · Overview</h2>
+    <h2><span class="secnum">01</span>Overview</h2>
     <ol class="flow">
       <li>UEFI firmware</li>
       <li>NightRun Rust entry &amp; runtime <em>single no_std EFI application</em></li>
@@ -60,7 +60,7 @@
   </section>
 
   <section id="not-linux">
-    <h2><span class="slash">//</span>2 · What NightRun is — and is not</h2>
+    <h2><span class="secnum">02</span>What NightRun is — and is not</h2>
     <p>There is no operating system underneath the chat you see. Concretely, there is:</p>
     <ul class="plain">
       <li>no Linux kernel or userspace, no desktop environment, no browser;</li>
@@ -79,7 +79,7 @@
   </section>
 
   <section id="uefi">
-    <h2><span class="slash">//</span>3 · Why UEFI-resident?</h2>
+    <h2><span class="secnum">03</span>Why UEFI-resident?</h2>
     <p>Staying on Boot Services buys four hard things at zero driver-development cost:</p>
     <ul class="plain">
       <li><strong>Graphics</strong> — the GOP framebuffer works on any UEFI machine, in whatever mode the firmware negotiated with the display.</li>
@@ -99,7 +99,7 @@
   </section>
 
   <section id="boot">
-    <h2><span class="slash">//</span>4 · Boot sequence</h2>
+    <h2><span class="secnum">04</span>Boot sequence</h2>
     <ol class="flow">
       <li>Firmware loads BOOTX64.EFI / BOOTAA64.EFI</li>
       <li>SIMD state enabled <em>x86: CR4/XCR0 dance for AVX · ARM: FP/SIMD un-trapped at EL2</em></li>
@@ -121,7 +121,7 @@
   </section>
 
   <section id="memory">
-    <h2><span class="slash">//</span>5 · Model residency and memory design</h2>
+    <h2><span class="secnum">05</span>Model residency and memory design</h2>
     <p>Memory is laid out once, at boot, and never reorganized:</p>
     <div class="tablewrap">
       <table>
@@ -150,7 +150,7 @@
   </section>
 
   <section id="pipeline">
-    <h2><span class="slash">//</span>6 · The inference pipeline</h2>
+    <h2><span class="secnum">06</span>The inference pipeline</h2>
     <div class="compare">
       <div class="card">
         <h4>Prompt prefill</h4>
@@ -175,7 +175,7 @@
   </section>
 
   <section id="kernels">
-    <h2><span class="slash">//</span>7 · Quantization and CPU kernels</h2>
+    <h2><span class="secnum">07</span>Quantization and CPU kernels</h2>
     <p>
       Local CPU inference lives and dies by memory bandwidth, which is why NightRun runs
       <em>directly on quantized weights</em>. Supported tensor formats are Q8_0 (32-weight blocks),
@@ -196,7 +196,7 @@
   </section>
 
   <section id="format">
-    <h2><span class="slash">//</span>8 · Model format and conversion</h2>
+    <h2><span class="secnum">08</span>Model format and conversion</h2>
     <ol class="flow">
       <li>GGUF artifact <em>from Hugging Face or local</em></li>
       <li>Inspection <em>architecture, tensor dtypes, tokenizer — metadata, not filenames</em></li>
@@ -218,7 +218,7 @@
   </section>
 
   <section id="families">
-    <h2><span class="slash">//</span>9 · Supported model families</h2>
+    <h2><span class="secnum">09</span>Supported model families</h2>
     <h3>Llama 3.2</h3>
     <ul class="plain">
       <li>Conventional decoder: RMSNorm → GQA attention → SwiGLU MLP</li>
@@ -243,7 +243,7 @@
   </section>
 
   <section id="tokenizer">
-    <h2><span class="slash">//</span>10 · Tokenizer and chat-template correctness</h2>
+    <h2><span class="secnum">10</span>Tokenizer and chat-template correctness</h2>
     <p>
       A model that loads perfectly but tokenizes almost-correctly produces subtly broken output —
       the hardest kind of bug to see. NightRun treats tokenization as a correctness surface equal
@@ -259,7 +259,7 @@
   </section>
 
   <section id="validation">
-    <h2><span class="slash">//</span>11 · Correctness and validation</h2>
+    <h2><span class="secnum">11</span>Correctness and validation</h2>
     <ol class="flow">
       <li>GGUF inspection + metadata validation</li>
       <li>Kernel equality tests <em>scalar vs AVX2 vs NEON, adversarial + saturated blocks</em></li>
@@ -279,7 +279,7 @@
   </section>
 
   <section id="tradeoffs">
-    <h2><span class="slash">//</span>12 · Tradeoffs and the hard parts</h2>
+    <h2><span class="secnum">12</span>Tradeoffs and the hard parts</h2>
     <p>Real systems have scars. A selection, honestly told:</p>
     <ul class="plain">
       <li><strong>The soft-float trap.</strong> Rust's builtin x86_64 UEFI target is soft-float; AVX intrinsics don't even compile. NightRun ships a custom hard-float target JSON and builds core/alloc from source. (The AArch64 UEFI target, pleasantly, is hard-float out of the box.)</li>
@@ -293,7 +293,7 @@
   </section>
 
   <section id="cta">
-    <h2><span class="slash">//</span>13 · Go deeper</h2>
+    <h2><span class="secnum">13</span>Go deeper</h2>
     <span class="cta">
       <a class="btn primary" href="docs.html">Read the full documentation</a>
       <a class="btn" href="install.html">Install NightRun</a>
