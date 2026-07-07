@@ -26,15 +26,31 @@ fn main() -> Status {
     serial_println!("[nightrun] v{} boot layer up", VERSION);
     uefi::helpers::init().expect("uefi helpers");
     serial::attach();
+    // Early boot narrates through the firmware text console: on hardware
+    // without a serial hookup, the last line frozen on screen names the
+    // failing stage.
+    con_print("NightRun: boot layer up\r\n");
     // The firmware watchdog would reset the machine mid-chat; disable it.
     let _ = uefi::boot::set_watchdog_timer(0, 0x1_0000, None);
+    con_print("NightRun: watchdog off, probing CPU features\r\n");
     enable_simd();
+    con_print("NightRun: bringing up framebuffer (GOP)\r\n");
 
     let display = video::init();
     install_panic_fb(&display);
+    serial_println!("[boot] framebuffer up, entering app");
 
     app::run(display);
     Status::SUCCESS
+}
+
+/// Print through the firmware's text console (visible on screen before
+/// our framebuffer takes over; no-op once it's unavailable).
+pub fn con_print(msg: &str) {
+    use core::fmt::Write as _;
+    uefi::system::with_stdout(|out| {
+        let _ = out.write_str(msg);
+    });
 }
 
 /// Enable the SIMD state the kernels need and log what the CPU offers.
@@ -122,6 +138,15 @@ impl core::fmt::Write for PanicBuf {
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     serial_println!("[panic] {}", info);
+
+    // Best effort: surface the panic on the firmware console too (covers
+    // failures before our framebuffer exists, e.g. GOP bring-up).
+    {
+        use core::fmt::Write as _;
+        uefi::system::with_stdout(|out| {
+            let _ = write!(out, "\r\nNightRun PANIC: {info}\r\n");
+        });
+    }
 
     let fb_ptr = PANIC_FB.load(Ordering::Acquire);
     if !fb_ptr.is_null() {

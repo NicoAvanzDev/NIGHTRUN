@@ -19,8 +19,30 @@ const PREFERRED: &[(usize, usize)] = &[(1280, 720), (1920, 1080), (1024, 768), (
 
 pub fn init() -> Display {
     let handle = boot::get_handle_for_protocol::<GraphicsOutput>().expect("no GOP handle");
-    let mut gop =
-        boot::open_protocol_exclusive::<GraphicsOutput>(handle).expect("open GOP");
+    // Exclusive keeps the firmware console from redrawing over us, but
+    // some platforms (Pi port) may refuse to release the GOP; fall back
+    // to a shared open rather than dying before we have any screen.
+    let mut gop = match boot::open_protocol_exclusive::<GraphicsOutput>(handle) {
+        Ok(gop) => gop,
+        Err(e) => {
+            crate::serial_println!("[video] exclusive GOP open failed ({e:?}); sharing");
+            crate::con_print("NightRun: GOP exclusive open failed, sharing\r\n");
+            let params = boot::OpenProtocolParams {
+                handle,
+                agent: boot::image_handle(),
+                controller: None,
+            };
+            // SAFETY: GetProtocol (shared) access; we are the only writer
+            // of pixel memory after this point in practice.
+            unsafe {
+                boot::open_protocol::<GraphicsOutput>(
+                    params,
+                    boot::OpenProtocolAttributes::GetProtocol,
+                )
+            }
+            .expect("open GOP (shared)")
+        }
+    };
 
     // On aarch64 (Raspberry Pi), the firmware's current mode is the one
     // the VPU negotiated from the display's EDID — and demonstrably
