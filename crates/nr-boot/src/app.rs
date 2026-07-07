@@ -77,8 +77,7 @@ pub fn run(display: Display) {
 const STAGES: &[&str] = &[
     "initializing runtime",
     "scanning memory",
-    "loading model into RAM",
-    "verifying checksums",
+    "loading + verifying model",
     "preparing inference engine",
     "starting chat interface",
 ];
@@ -138,7 +137,7 @@ fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx
                 done as u64 * 1000 / ms / (1024 * 1024)
             };
             ui.show(2, pm, &alloc::format!(
-                "{} / {} MB  ({} MB/s)",
+                "{} / {} MB  ({} MB/s, CRC32 inline)",
                 done / (1024 * 1024),
                 total / (1024 * 1024),
                 mbs
@@ -146,35 +145,30 @@ fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx
         };
         match crate::modelload::load(&mut cb) {
             Ok(buf) => buf,
+            Err(crate::modelload::LoadError::Corrupt(which)) => ui.fail(&alloc::format!(
+                "model.nrm is corrupt ({which:?} checksum mismatch) - re-flash the image or rebuild with: cargo xtask image"
+            )),
             Err(e) => ui.fail(&alloc::format!(
                 "model.nrm load failed ({e:?}) - build the image with: cargo xtask image"
             )),
         }
     };
     let load_ms = clock.ticks_to_ms(clock.now() - t0);
-    serial_println!("[boot] model loaded: {} bytes in {} ms", blob.len(), load_ms);
+    serial_println!(
+        "[boot] model loaded + verified (streaming CRC) in {} ms",
+        load_ms
+    );
 
-    // Stage 3: parse + verify.
     let model = match Model::parse(blob) {
         Ok(m) => m,
         Err(e) => ui.fail(&alloc::format!("model.nrm invalid: {e:?}")),
     };
-    let t0 = clock.now();
-    let ok = model.verify_data(|done, total| {
-        let pm = (done as u64 * 1000 / total.max(1) as u64) as u32;
-        ui.show(3, pm, &alloc::format!("CRC32 {} / {} MB", done / (1024 * 1024), total / (1024 * 1024)));
-    });
-    if !ok {
-        ui.fail("tensor data checksum mismatch - rebuild model.nrm");
-    }
-    let verify_ms = clock.ticks_to_ms(clock.now() - t0);
     let tokenizer = match Tokenizer::parse(model.tokenizer_blob) {
         Ok(t) => t,
         Err(e) => ui.fail(&alloc::format!("tokenizer blob invalid: {e:?}")),
     };
     serial_println!(
-        "[boot] verified in {} ms; vocab={} layers={}",
-        verify_ms,
+        "[boot] vocab={} layers={}",
         tokenizer.vocab_len(),
         model.meta.n_layers
     );
@@ -197,7 +191,7 @@ fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx
     for off in (0..arena_bytes).step_by(16 * 1024 * 1024) {
         let len = (16 * 1024 * 1024).min(arena_bytes - off);
         unsafe { core::ptr::write_bytes(base.as_ptr().add(off), 0, len) };
-        ui.show(4, ((off + len) * 500 / arena_bytes) as u32, &alloc::format!("{arena_mb} MB resident arena"));
+        ui.show(3, ((off + len) * 500 / arena_bytes) as u32, &alloc::format!("{arena_mb} MB resident arena"));
     }
 
     // The model must outlive the InferCtx that borrows it; both live for
@@ -209,18 +203,18 @@ fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx
             .map(|s| s.as_mut_ptr())
             .unwrap_or(core::ptr::null_mut())
     };
-    ui.show(4, 750, &alloc::format!("KV cache + scratch ({} MB, ctx {})", need / (1024 * 1024), CTX_LEN));
+    ui.show(3, 750, &alloc::format!("KV cache + scratch ({} MB, ctx {})", need / (1024 * 1024), CTX_LEN));
     let infer = match InferCtx::new(model, CTX_LEN, &mut alloc_cb) {
         Ok(i) => i,
         Err(e) => ui.fail(&alloc::format!("inference init failed: {e:?}")),
     };
     let sampler = Sampler::new(0.7, 0.9, nr_runtime::clock::rdtsc());
-    ui.show(4, 1000, "inference engine ready");
+    ui.show(3, 1000, "inference engine ready");
 
     // Stage 5: done.
     let boot_ms = clock.ticks_to_ms(clock.now() - t_boot);
     serial_println!("[boot] chat-ready in {} ms (after splash)", boot_ms);
-    ui.show(5, 1000, &alloc::format!("boot sequence {}.{}s", boot_ms / 1000, boot_ms % 1000 / 100));
+    ui.show(4, 1000, &alloc::format!("boot sequence {}.{}s", boot_ms / 1000, boot_ms % 1000 / 100));
     stall_us(400_000);
 
     // The converter writes the full display name incl. quant label.

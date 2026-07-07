@@ -23,6 +23,8 @@ use uefi::CString16;
 pub enum LoadError {
     Fs(uefi::Status),
     NotFound,
+    /// Streaming checksum mismatch (file corrupt on the boot medium).
+    Corrupt(nr_model::verify::VerifyError),
     OutOfMemory,
     ReadFailed(uefi::Status),
 }
@@ -55,6 +57,9 @@ pub fn load(progress: &mut dyn FnMut(usize, usize)) -> Result<&'static mut [u8],
     // SAFETY: freshly allocated region of `pages * 4096 >= size` bytes.
     let buf = unsafe { core::slice::from_raw_parts_mut(base.as_ptr(), size) };
 
+    // Checksums are computed while the chunks stream in — no second pass
+    // over the model after loading.
+    let mut verifier: Option<nr_model::verify::StreamingVerifier> = None;
     let mut done = 0;
     while done < size {
         let end = (done + CHUNK).min(size);
@@ -62,8 +67,23 @@ pub fn load(progress: &mut dyn FnMut(usize, usize)) -> Result<&'static mut [u8],
         if n == 0 {
             return Err(LoadError::ReadFailed(uefi::Status::END_OF_FILE));
         }
+        let prev = done;
         done += n;
+        if verifier.is_none() && done >= nr_model::format::HEADER_SIZE {
+            verifier = Some(
+                nr_model::verify::StreamingVerifier::new(&buf[..done])
+                    .map_err(LoadError::Corrupt)?,
+            );
+            // The first feed covers everything read so far.
+            verifier.as_mut().unwrap().feed(0, &buf[..done]);
+        } else if let Some(v) = verifier.as_mut() {
+            v.feed(prev, &buf[prev..done]);
+        }
         progress(done, size);
+    }
+    match verifier {
+        Some(v) => v.finish().map_err(LoadError::Corrupt)?,
+        None => return Err(LoadError::ReadFailed(uefi::Status::END_OF_FILE)),
     }
     Ok(buf)
 }
