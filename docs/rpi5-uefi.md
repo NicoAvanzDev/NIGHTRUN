@@ -151,9 +151,12 @@ Granite 3B ≈ 4.5-6 tok/s. Numbers are recorded when measured, not before.
 - [x] aarch64 kernels bit-identical to scalar (qemu-user test rig)
 - [x] full engine e2e on aarch64 UEFI in QEMU (chat + generation)
 - [ ] x86 USB boot re-verified on real hardware
-- [ ] Pi 5 boots NightRun via UEFI (real D0 board)
-- [ ] GOP / keyboard / storage / timer / RAM load / MP verified on-device
-- [ ] ≥1 model RAM-resident generating locally on the Pi
+- [x] Pi 5 boots NightRun via UEFI (real D0 board, 2026-07-07)
+- [x] GOP / keyboard / storage / timer / RAM load / MP verified on-device
+      (4c shown; Granite loaded + streaming CRC passed from SD)
+- [x] ≥1 model RAM-resident generating locally on the Pi
+      (Granite 3B: pp 6.2 tok/s, ftl 1.9 s, decode 3.0 tok/s)
 - [x] no Linux / host process / streamed weights anywhere in the Pi path
 - [x] firmware pins, EEPROM pair, board assumptions documented
-- [ ] Pi benchmarks with thermal conditions documented
+- [ ] Pi benchmarks with thermal conditions documented (numbers taken;
+      cooling setup + sustained drift still to record)
