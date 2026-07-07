@@ -77,8 +77,8 @@ when bring-up succeeds.
 ## Board support
 
 - **D0 stepping** (all 2 GB/16 GB, late-2024+ 4/8 GB, CM5): the pinned
-  master build. This is the revision we test on (user board: `d04170`,
-  4 GB).
+  master build. This is the revision we test on (user board: D0, 8 GB —
+  all three models fit, including Qwen3 4B).
 - **C1 stepping** (2023/early-2024 4/8 GB): the fork keeps a `C1` branch;
   the archived worproject v0.3 also covers it. Supported by tooling,
   **untested by us** — no C1 board available.
