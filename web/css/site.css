@@ -261,7 +261,15 @@ dl.rows dd { margin: 0; }
   dl.rows dt { margin-top: 0.55rem; }
 }
 
-/* ---------- docs layout with TOC ---------- */
+/* ---------- docs TOC cards ---------- */
+
+.toc-grid { margin: 0.5rem 0 1rem; }
+a.toc-card { display: block; text-decoration: none; color: var(--text); transition: border-color 120ms ease; }
+a.toc-card:hover { border-color: var(--purple); color: var(--text); }
+a.toc-card h4 { color: var(--text); }
+a.toc-card p { color: var(--dim); }
+
+/* ---------- (legacy) docs sidebar layout ---------- */
 
 .docs-layout { display: grid; grid-template-columns: 15rem 1fr; gap: 2.5rem; align-items: start; }
 .toc {
@@ -285,9 +293,17 @@ dl.rows dd { margin: 0; }
 
 .site-footer {
   border-top: 1px solid var(--border);
-  padding: 2rem 0 3rem;
+  background: linear-gradient(180deg, var(--bg), #0d0520);
+  padding: 2.4rem 0 2.6rem;
   color: var(--dim);
   font-size: 0.88rem;
 }
-.site-footer a { color: var(--dim); }
+.site-footer a { color: var(--dim); text-decoration: none; }
 .site-footer a:hover { color: var(--text); }
+.site-footer h4 { color: var(--text); font-size: 0.85rem; text-transform: uppercase;
+                  letter-spacing: 0.08em; margin: 0 0 0.5rem; }
+.footer-cols { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 2rem; }
+.footer-cols li + li { margin-top: 0.3rem; }
+.footer-fine { margin-top: 1.8rem; padding-top: 1.2rem; border-top: 1px solid var(--border-dim);
+               font-size: 0.8rem; }
+@media (max-width: 640px) { .footer-cols { grid-template-columns: 1fr; gap: 1.2rem; } }

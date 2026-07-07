@@ -70,7 +70,7 @@ t "diskpath: mmcblk0 shape accepted" bash -c '
 # ---- manifest ------------------------------------------------------------
 
 t "manifest: loads" nr_manifest_load "$NR_MANIFEST"
-t "manifest: three models" eq "${#NR_MODEL_IDS[@]}" 3
+t "manifest: four models" eq "${#NR_MODEL_IDS[@]}" 4
 t "manifest: llama sha present" eq "${NR_MF[llama-1b.sha256]:0:8}" "432f310a"
 t "manifest: malformed line tolerated" bash -c '
     source "'"$LIB"'/safety.sh" >/dev/null 2>&1

@@ -56,12 +56,16 @@
     <pre data-copy><code>git clone https://github.com/hardrave/NIGHTRUN.git
 cd NIGHTRUN
 ./install.sh</code></pre>
+    <p class="muted">Or bootstrap in one line — the script only clones the repository and starts
+    the same interactive installer
+    (<a href="install-nightrun.sh">inspect it first</a>):</p>
+    <pre data-copy><code>curl -fsSL https://nightrun.io/install-nightrun.sh | sh</code></pre>
     <p class="muted">
-      The interactive installer builds a bootable image for your target (x86_64 USB or
-      Raspberry&nbsp;Pi&nbsp;5 SD card), downloads and verifies a model, and flashes removable media —
-      with an exact typed confirmation before anything destructive. Prefer to read before you run?
-      <a href="https://github.com/hardrave/NIGHTRUN/blob/master/install.sh">Inspect install.sh</a>
-      first, or follow the <a href="install.html#manual-x86">manual steps</a>.
+      The installer builds a bootable image for your target (x86_64 USB or Raspberry&nbsp;Pi&nbsp;5
+      SD card), downloads and verifies a model, and flashes removable media — with an exact typed
+      confirmation before anything destructive. Prefer full control?
+      <a href="https://github.com/hardrave/NIGHTRUN/blob/master/install.sh">Read install.sh</a>
+      or follow the <a href="install.html#manual-x86">manual steps</a>.
     </p>
   </section>
 
@@ -144,16 +148,19 @@ cd NIGHTRUN
         <thead><tr><th>Model</th><th>Quantization</th><th>Size</th><th>Runs on</th></tr></thead>
         <tbody>
           <tr><td>Llama 3.2 1B Instruct</td><td>Q8_0</td><td>1.3 GB</td><td>x86_64 · Pi 5</td></tr>
-          <tr><td>Qwen3 4B Instruct 2507</td><td>Q4_K_M</td><td>2.4 GB</td><td>x86_64 · Pi 5 (8 GB boards)</td></tr>
+          <tr><td>Llama 3.2 3B Instruct</td><td>Q4_K_M</td><td>1.9 GB</td><td>x86_64 · Pi 5</td></tr>
           <tr><td>Granite 4.1 3B</td><td>Q4_K_M</td><td>2.0 GB</td><td>x86_64 · Pi 5</td></tr>
+          <tr><td>Qwen3 4B Instruct 2507</td><td>Q4_K_M</td><td>2.4 GB</td><td>x86_64 · Pi 5 (8 GB boards)</td></tr>
         </tbody>
       </table>
     </div>
     <p class="muted">
-      Granite support covers the <strong>conventional dense transformer</strong> release only —
-      hybrid (SSM/MoE) Granite variants are detected and rejected at conversion. NightRun does not
-      claim arbitrary GGUF compatibility: models pass metadata inspection, conversion validation,
-      and reference testing before joining this table.
+      Supported tensor quantizations are <strong>Q8_0, Q4_K and Q6_K</strong> (plus F32 norms) —
+      so GGUF builds like Q8_0, Q4_K_M, Q4_K_S and Q6_K convert with each tensor's exact
+      quantization preserved. Granite support covers the <strong>conventional dense
+      transformer</strong> release only — hybrid (SSM/MoE) Granite variants are detected and
+      rejected at conversion. NightRun does not claim arbitrary GGUF compatibility: models pass
+      metadata inspection, conversion validation, and reference testing before joining this table.
     </p>
   </section>
 
@@ -171,11 +178,13 @@ cd NIGHTRUN
       </table>
     </div>
     <p class="muted">
-      Prompt = batched prefill throughput; decode = interactive generation. All numbers are from the
-      repository's benchmark logs under stated conditions — none are projections. *The Pi figure
-      predates the ARM dot-product (sdot) kernels now in the tree. NightRun does not claim to be
-      globally faster than llama.cpp; see the
-      <a href="docs.html#benchmarks">benchmark methodology</a> for context and fair comparisons.
+      Prompt = batched prefill throughput; decode = interactive generation, measured on short
+      contexts. <strong>Decode slows as the context fills</strong> — attention reads the whole KV
+      cache every token (measured: Granite ~13 tok/s early falls to ~11.6 tok/s averaged over a
+      384-token generation; still fluid, honestly slower). All numbers are from the repository's
+      benchmark logs under stated conditions — none are projections. *The Pi figure predates the
+      ARM dot-product (sdot) kernels now in the tree. NightRun does not claim to be globally
+      faster than llama.cpp; see the <a href="docs.html#benchmarks">benchmark methodology</a>.
     </p>
   </section>
 
@@ -207,10 +216,33 @@ cd NIGHTRUN
 
 <footer class="site-footer">
   <div class="wrap">
-    <p>NightRun — code under the MIT license. Model weights are not included and remain subject to
-    their own licenses (Llama Community License; Apache-2.0 for Qwen and Granite).
+    <div class="footer-cols">
+      <div>
+        <img src="assets/logo.svg" alt="" aria-hidden="true" height="16" style="height:16px;width:auto;opacity:.85">
+        <p style="margin-top:.6rem">A local LLM runtime that boots.<br>No operating system underneath.</p>
+      </div>
+      <div>
+        <h4>Project</h4>
+        <ul class="plain" style="list-style:none;margin-left:0">
+          <li><a href="index.html">Home</a></li>
+          <li><a href="architecture.html">Architecture</a></li>
+          <li><a href="docs.html">Documentation</a></li>
+          <li><a href="install.html">Install</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Source</h4>
+        <ul class="plain" style="list-style:none;margin-left:0">
+          <li><a href="https://github.com/hardrave/NIGHTRUN">GitHub repository</a></li>
+          <li><a href="https://github.com/hardrave/NIGHTRUN/issues">Issues</a></li>
+          <li><a href="https://github.com/hardrave/NIGHTRUN/blob/master/install.sh">install.sh</a></li>
+          <li><a href="https://github.com/hardrave/NIGHTRUN/blob/master/docs/benchmarks.md">Benchmark logs</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="footer-fine">Code under the MIT license. Model weights are not included and remain subject
+    to their own licenses (Llama Community License; Apache-2.0 for Qwen and Granite builds).
     Spleen bitmap font, BSD 2-Clause.</p>
-    <p><a href="https://github.com/hardrave/NIGHTRUN">github.com/hardrave/NIGHTRUN</a></p>
   </div>
 </footer>
 

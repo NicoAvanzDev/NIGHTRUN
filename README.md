@@ -72,6 +72,12 @@ curl -L -o models/Llama-3.2-1B-Instruct-Q8_0.gguf \
   https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q8_0.gguf
 cargo run --release -p nrconvert -- \
   models/Llama-3.2-1B-Instruct-Q8_0.gguf models/model.nrm
+
+# Llama 3.2 3B Instruct Q4_K_M (~2.0 GB) - the larger Llama
+curl -L -o models/Llama-3.2-3B-Instruct-Q4_K_M.gguf \
+  https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf
+cargo run --release -p nrconvert -- \
+  models/Llama-3.2-3B-Instruct-Q4_K_M.gguf models/llama-3.2-3b-q4km.nrm
 ```
 
 The converter validates its own output (parses it back, re-checksums,
