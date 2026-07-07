@@ -62,7 +62,9 @@ Record the printed `RPI_EFI.fd` SHA-256 here after each rebuild:
 
 - 2026-07-07, commit `ad501cf3`, gcc-aarch64-linux-gnu (Ubuntu noble):
   - `RPI_EFI.fd` = `8136a19d07c67c4b0804eaffd7e11f4c0de90a15aec7ef11d0073d57cf9a94c6`
-  - `config.txt` = `9c34ec9c0eee9e1d7baddda1011dc1df6211c37375eb43b1e9cef05a8ead457b`
+  - `config.txt` = repo-owned `assets/pi5/config.txt` (vendor settings +
+    `os_check=0`), superseding the vendor file hashed at
+    `9c34ec9c0eee...` — see the bring-up checklist for why.
 
 ## EEPROM requirement (matched-pair rule)
 
@@ -107,7 +109,13 @@ Stage gates; record each result (and the UART transcript) here. Serial:
    or later (update with `-a` if older, then note the version here).
 2. **Flash**: `sudo dd if=nightrun-pi5.img of=/dev/sdX bs=4M oflag=direct status=progress && sync`.
 3. **Firmware boots**: QR screen → Pi logo + progress bar (fork firmware
-   alive). If black screen: EEPROM too old, or D0/C1 mismatch.
+   alive). If black screen: EEPROM too old, or D0/C1 mismatch. If the
+   bootloader complains "installed OS does not indicate support for
+   Raspberry Pi 5": `os_check=0` is missing from config.txt — our
+   repo-owned `assets/pi5/config.txt` includes it (hit on the real D0
+   board 2026-07-07; newer EEPROMs apply an OS-support check that UEFI
+   armstubs can't satisfy). Never hand-edit files on the card; rebuild
+   with `cargo xtask pi-image` and re-flash.
 4. **NightRun boots**: `[nightrun] vX.Y.Z boot layer up` on UART;
    `[cpu] aarch64 neon baseline; dotprod=true fp16=true` expected on A76.
 5. **GOP**: synthwave splash on HDMI; note the mode

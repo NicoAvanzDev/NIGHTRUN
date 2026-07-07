@@ -120,12 +120,15 @@ fn copy_into<IO: fatfs::ReadWriteSeek>(
 /// EFI/BOOT/BOOTAA64.EFI and model.nrm.
 pub fn build_pi(img_path: &Path, efi: &Path, model: Option<&Path>, firmware_dir: &Path) {
     let fw_fd = firmware_dir.join("RPI_EFI.fd");
-    let fw_cfg = firmware_dir.join("config.txt");
+    // config.txt is repo-owned (vendor's settings + the os_check=0
+    // override newer EEPROMs need for UEFI armstubs).
+    let fw_cfg = firmware_dir.join("../../assets/pi5/config.txt");
     assert!(
-        fw_fd.exists() && fw_cfg.exists(),
-        "firmware payload missing ({} / config.txt) - build it first: scripts/build-rpi5-firmware.sh",
+        fw_fd.exists(),
+        "firmware payload missing ({}) - build it first: scripts/build-rpi5-firmware.sh",
         fw_fd.display()
     );
+    assert!(fw_cfg.exists(), "missing assets/pi5/config.txt");
 
     let model_size = model.map(|m| std::fs::metadata(m).expect("model file").len()).unwrap_or(0);
     let contents = model_size

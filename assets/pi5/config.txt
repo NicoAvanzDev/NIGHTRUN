@@ -1,0 +1,24 @@
+# NightRun Pi 5 boot config (owned by the repo — vendor's pinned
+# config.txt plus the os_check override; see docs/rpi5-uefi.md).
+
+armstub=RPI_EFI.fd
+device_tree_address=0x3e0000
+device_tree_end=0x400000
+
+# Newer Pi 5 EEPROMs verify the OS declares Pi 5 support; a UEFI armstub
+# carries no such marker, so the check must be off (observed on the D0
+# board with the 2025+ EEPROM: without this, the bootloader stops with
+# "The installed operating system (OS) does not indicate support...").
+os_check=0
+
+# Force 32 bpp framebuffer allocation.
+framebuffer_depth=32
+
+# Disable compensation for displays with overscan.
+disable_overscan=1
+
+# Force maximum USB power regardless of the power supply.
+usb_max_current_enable=1
+
+# Force maximum CPU speed.
+force_turbo=1
