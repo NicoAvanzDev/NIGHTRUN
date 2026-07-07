@@ -199,12 +199,14 @@ fn scrollback(
     let _ = assistant;
     let body_cols = cols.saturating_sub(content_col).max(8);
 
-    // Wrap all turns into (label_color, body_color, label, body) records;
-    // continuation lines carry an empty label.
-    let mut lines: Vec<(u32, u32, String, String)> = Vec::new();
+    // Wrap all turns into (label_color, body_color, label, body, at_margin)
+    // records; continuation lines carry an empty label. System text (the
+    // intro/help/status lines) starts at the label column, not the content
+    // column.
+    let mut lines: Vec<(u32, u32, String, String, bool)> = Vec::new();
     for (i, turn) in turns.iter().enumerate() {
         if i > 0 {
-            lines.push((0, 0, String::new(), String::new())); // separator
+            lines.push((0, 0, String::new(), String::new(), false)); // separator
         }
         let label = match turn.role {
             Role::User => String::from("user:"),
@@ -217,20 +219,20 @@ fn scrollback(
         };
         // System text keeps its accent color on every line; user/assistant
         // bodies render in primary.
-        let body_color = match turn.role {
-            Role::System => turn.role.color(),
-            _ => theme::TEXT_PRIMARY,
+        let (body_color, at_margin, width) = match turn.role {
+            Role::System => (turn.role.color(), true, cols),
+            _ => (theme::TEXT_PRIMARY, false, body_cols),
         };
         let streaming_tail = generating && i == turns.len() - 1 && turn.role == Role::Llama;
         let mut first = true;
-        for line in wrap(&turn.text, body_cols, streaming_tail) {
+        for line in wrap(&turn.text, width, streaming_tail) {
             let l = if first { label.clone() } else { String::new() };
-            lines.push((turn.role.color(), body_color, l, line));
+            lines.push((turn.role.color(), body_color, l, line, at_margin));
             first = false;
         }
         if first {
             // Empty turn (streaming just started): show the bare label.
-            lines.push((turn.role.color(), body_color, label, String::new()));
+            lines.push((turn.role.color(), body_color, label, String::new(), at_margin));
         }
     }
 
@@ -243,12 +245,13 @@ fn scrollback(
     let start = end.saturating_sub(max_lines);
     let mut y = top;
     let body_x = MARGIN + content_col as i32 * f.width as i32;
-    for (label_color, body_color, label, body) in &lines[start..end] {
+    for (label_color, body_color, label, body, at_margin) in &lines[start..end] {
         if !label.is_empty() {
             draw::text(surf, f, MARGIN, y, label, *label_color, 1, 0);
         }
         if !body.is_empty() {
-            draw::text(surf, f, body_x, y, body, *body_color, 1, 0);
+            let x = if *at_margin { MARGIN } else { body_x };
+            draw::text(surf, f, x, y, body, *body_color, 1, 0);
         }
         y += line_h;
     }
