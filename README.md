@@ -78,6 +78,14 @@ The converter validates its own output (parses it back, re-checksums,
 smoke-tests the tokenizer); `nrconvert --inspect file.gguf` dumps a
 GGUF's per-tensor dtype table.
 
+## Guided install (recommended)
+
+`./install.sh` walks you from target choice (x86_64 UEFI USB or
+Raspberry Pi 5 SD card) through verified model download, conversion and
+image build, to safely flashing and verifying removable media — with an
+exact typed confirmation before anything destructive. See
+[docs/installer.md](docs/installer.md).
+
 ## Build the bootable image and run it
 
 ```sh

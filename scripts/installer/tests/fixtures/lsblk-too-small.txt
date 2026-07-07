@@ -1,0 +1,1 @@
+PATH="/dev/sdb" TYPE="disk" SIZE="1000000000" RM="1" TRAN="usb" MODEL="Tiny Stick" SERIAL="T1" MAJ:MIN="8:16" MOUNTPOINTS=""

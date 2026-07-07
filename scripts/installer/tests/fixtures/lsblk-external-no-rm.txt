@@ -1,0 +1,1 @@
+PATH="/dev/sdb" TYPE="disk" SIZE="62109253632" RM="0" TRAN="usb" MODEL="Enclosure NoRM" SERIAL="E1" MAJ:MIN="8:16" MOUNTPOINTS=""

@@ -1,0 +1,1 @@
+PATH="/dev/sda" TYPE="disk" SIZE="512110190592" RM="1" TRAN="sata" MODEL="Lying SATA" SERIAL="L1" MAJ:MIN="8:0" MOUNTPOINTS=""

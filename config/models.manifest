@@ -1,0 +1,60 @@
+# NightRun model manifest — the single source of truth for the installer's
+# model catalog. Line format: `model.<id>.<key> = <value>` (parsed line by
+# line; this file is data, never sourced as shell). Blank lines and `#`
+# comments are ignored. Bump `manifest.version` on format changes.
+#
+# sha256 values were computed from local artifacts AND cross-checked against
+# Hugging Face's X-Linked-ETag (the LFS object hash) on 2026-07-07.
+# `revision` pins the repo commit the artifact was fetched from; downloads
+# resolve `.../resolve/<revision>/<file>` so a moved branch cannot silently
+# change what users get.
+
+manifest.version = 1
+
+model.llama-1b.name           = Llama 3.2 1B Instruct
+model.llama-1b.family         = llama3
+model.llama-1b.quant          = Q8_0
+model.llama-1b.repo           = bartowski/Llama-3.2-1B-Instruct-GGUF
+model.llama-1b.file           = Llama-3.2-1B-Instruct-Q8_0.gguf
+model.llama-1b.revision       = 067b946cf014b7c697f3654f621d577a3e3afd1c
+model.llama-1b.sha256         = 432f310a77f4650a88d0fd59ecdd7cebed8d684bafea53cbff0473542964f0c3
+model.llama-1b.size_bytes     = 1321083008
+model.llama-1b.license        = Llama 3.2 Community License (Meta)
+model.llama-1b.gated          = no
+model.llama-1b.min_ram_gb     = 4
+model.llama-1b.targets        = x86_64,rpi5
+model.llama-1b.nrm_bytes      = 1319604608
+model.llama-1b.min_media_gb   = 4
+model.llama-1b.blurb          = Compact and fast - the lowest memory requirement
+
+model.granite-3b.name         = Granite 4.1 3B
+model.granite-3b.family       = granite
+model.granite-3b.quant        = Q4_K_M
+model.granite-3b.repo         = ibm-granite/granite-4.1-3b-GGUF
+model.granite-3b.file         = granite-4.1-3b-Q4_K_M.gguf
+model.granite-3b.revision     = ab4701481089b58a082ef63cc1cee738887293ff
+model.granite-3b.sha256       = 662b0626cd58f443baea23559b469df6576a81d349649c59413b36a9fb32eb29
+model.granite-3b.size_bytes   = 2099501664
+model.granite-3b.license      = Apache-2.0 (IBM)
+model.granite-3b.gated        = no
+model.granite-3b.min_ram_gb   = 6
+model.granite-3b.targets      = x86_64,rpi5
+model.granite-3b.nrm_bytes    = 2098994176
+model.granite-3b.min_media_gb = 4
+model.granite-3b.blurb        = Dense transformer - the recommended Raspberry Pi 5 model
+
+model.qwen3-4b.name           = Qwen3 4B Instruct 2507
+model.qwen3-4b.family         = qwen3
+model.qwen3-4b.quant          = Q4_K_M
+model.qwen3-4b.repo           = unsloth/Qwen3-4B-Instruct-2507-GGUF
+model.qwen3-4b.file           = Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+model.qwen3-4b.revision       = a06e946bb6b655725eafa393f4a9745d460374c9
+model.qwen3-4b.sha256         = 3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597
+model.qwen3-4b.size_bytes     = 2497281120
+model.qwen3-4b.license        = Apache-2.0 (Alibaba / unsloth build)
+model.qwen3-4b.gated          = no
+model.qwen3-4b.min_ram_gb     = 8
+model.qwen3-4b.targets        = x86_64,rpi5-8gb
+model.qwen3-4b.nrm_bytes      = 2495954880
+model.qwen3-4b.min_media_gb   = 4
+model.qwen3-4b.blurb          = The largest catalog model - needs an 8 GB board on Pi 5

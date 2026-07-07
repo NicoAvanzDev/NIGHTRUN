@@ -1,0 +1,2 @@
+PATH="/dev/sdb" TYPE="disk" SIZE="31054626816" RM="1" TRAN="usb" MODEL="Kingston DT" SERIAL="X2" MAJ:MIN="8:16" MOUNTPOINTS=""
+PATH="/dev/sdc" TYPE="disk" SIZE="62109253632" RM="1" TRAN="usb" MODEL="SanDisk Ultra" SERIAL="X1" MAJ:MIN="8:32" MOUNTPOINTS=""
