@@ -506,7 +506,9 @@ fn draw_chat(
         cores: p.cores,
         generating,
     };
-    let cursor_on = !generating && (frame / 16) % 2 == 0;
+    // The blink phase is shared; chat::draw places the block cursor in the
+    // output area while generating, in the input field otherwise.
+    let cursor_on = (frame / 16) % 2 == 0;
     let scroll = nr_ui::chat::draw(surf, &p.fonts, turns, input, cursor_on, &stats, scroll);
     p.display.present(surf);
     scroll

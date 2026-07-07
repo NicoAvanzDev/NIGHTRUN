@@ -77,7 +77,9 @@ pub fn draw(
     let content_col = "user:".len().max(stats.assistant.len() + 1) + 1;
     status_bar(surf, fonts, stats);
     input_bar(surf, fonts, input, cursor_on, stats.generating);
-    let scroll = scrollback(surf, fonts, turns, stats.generating, scroll, stats.assistant, content_col);
+    let scroll = scrollback(
+        surf, fonts, turns, stats.generating, cursor_on, scroll, stats.assistant, content_col,
+    );
     draw::scanlines(surf, 26);
     scroll
 }
@@ -183,6 +185,7 @@ fn scrollback(
     fonts: &Fonts,
     turns: &[Turn],
     generating: bool,
+    cursor_on: bool,
     scroll: usize,
     assistant: &str,
     content_col: usize,
@@ -223,9 +226,8 @@ fn scrollback(
             Role::System => (turn.role.color(), true, cols),
             _ => (theme::TEXT_PRIMARY, false, body_cols),
         };
-        let streaming_tail = generating && i == turns.len() - 1 && turn.role == Role::Llama;
         let mut first = true;
-        for line in wrap(&turn.text, width, streaming_tail) {
+        for line in wrap(&turn.text, width) {
             let l = if first { label.clone() } else { String::new() };
             lines.push((turn.role.color(), body_color, l, line, at_margin));
             first = false;
@@ -256,6 +258,25 @@ fn scrollback(
         y += line_h;
     }
 
+    // While the model streams, the blinking block cursor lives at the end
+    // of the output (the input field shows the generating notice instead);
+    // it moves back to the input field when generation completes.
+    let streaming = generating && turns.last().is_some_and(|t| t.role == Role::Llama);
+    if streaming && cursor_on && scroll == 0 && end > start {
+        let (_, _, _, body, at_margin) = &lines[end - 1];
+        let base_x = if *at_margin { MARGIN } else { body_x };
+        let mut cx = base_x + draw::text_width(f, body, 1, 0) + 2;
+        let mut cy = y - line_h;
+        if cx + f.width as i32 > surf.width as i32 - MARGIN {
+            // Last line is full: the next character starts a new row.
+            cx = base_x;
+            cy += line_h;
+        }
+        if cy + line_h <= bottom {
+            surf.fill_rect(cx, cy + 2, f.width as i32 - 2, f.height as i32 - 4, theme::NEON_PINK);
+        }
+    }
+
     // History indicator while scrolled up.
     if scroll > 0 {
         let f = &fonts.small;
@@ -272,8 +293,8 @@ fn scrollback(
     scroll
 }
 
-/// Word wrap to `cols` columns. If `cursor_tail`, append a streaming marker.
-fn wrap(text: &str, cols: usize, cursor_tail: bool) -> Vec<String> {
+/// Word wrap to `cols` columns.
+fn wrap(text: &str, cols: usize) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for para in text.split('\n') {
         let mut line = String::new();
@@ -291,15 +312,6 @@ fn wrap(text: &str, cols: usize, cursor_tail: bool) -> Vec<String> {
             }
         }
         out.push(line);
-    }
-    if cursor_tail {
-        if let Some(last) = out.last_mut() {
-            if last.chars().count() + 1 <= cols {
-                last.push('_');
-            } else {
-                out.push(String::from("_"));
-            }
-        }
     }
     out
 }
