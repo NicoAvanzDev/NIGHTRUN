@@ -22,6 +22,13 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[entry]
 fn main() -> Status {
+    // FIRST: make FP/SIMD usable. QEMU's AAVMF enables it before running
+    // apps, but firmware is not required to — with access trapped, the
+    // first FP/NEON instruction (rustc emits them even in memcpy) is a
+    // silent synchronous exception. Integer-registers-only asm.
+    #[cfg(target_arch = "aarch64")]
+    enable_fp_early();
+
     serial::init();
     serial_println!("[nightrun] v{} boot layer up", VERSION);
     uefi::helpers::init().expect("uefi helpers");
@@ -65,12 +72,45 @@ fn enable_simd() {
 }
 
 /// NEON is architecturally baseline on aarch64 UEFI (hard-float target);
-/// nothing to enable, just log the probed optional features.
+/// access is unlocked by `enable_fp_early` at entry, so just log.
 #[cfg(target_arch = "aarch64")]
 fn enable_simd() {
     enable_simd_quiet();
     let f = nr_tensor::cpu::features();
     serial_println!("[cpu] aarch64 neon baseline; dotprod={} fp16={}", f.dotprod, f.fp16);
+}
+
+/// Un-trap FP/SIMD at whichever EL the firmware runs us (the aarch64
+/// analog of the x86 XCR0 enable). Uses only integer registers so it is
+/// safe to run before FP access exists.
+#[cfg(target_arch = "aarch64")]
+#[inline(never)]
+fn enable_fp_early() {
+    // SAFETY: reads CurrentEL and flips only the FP-trap controls for
+    // that EL, then isb. No memory access, integer registers only.
+    unsafe {
+        let el: u64;
+        core::arch::asm!("mrs {}, CurrentEL", out(reg) el, options(nomem, nostack));
+        match (el >> 2) & 3 {
+            2 => {
+                // EL2 (TF-A launches EDK2 here on the Pi): clear
+                // CPTR_EL2.TFP (bit 10, traps FP/SIMD when set).
+                let mut cptr: u64;
+                core::arch::asm!("mrs {}, cptr_el2", out(reg) cptr, options(nomem, nostack));
+                cptr &= !(1u64 << 10);
+                core::arch::asm!("msr cptr_el2, {}", in(reg) cptr, options(nomem, nostack));
+            }
+            1 => {
+                // EL1 (QEMU virt AAVMF): CPACR_EL1.FPEN = 0b11 (no traps).
+                let mut cpacr: u64;
+                core::arch::asm!("mrs {}, cpacr_el1", out(reg) cpacr, options(nomem, nostack));
+                cpacr |= 0b11 << 20;
+                core::arch::asm!("msr cpacr_el1, {}", in(reg) cpacr, options(nomem, nostack));
+            }
+            _ => {}
+        }
+        core::arch::asm!("isb", options(nomem, nostack));
+    }
 }
 
 #[cfg(target_arch = "aarch64")]
