@@ -22,15 +22,23 @@ pub fn init() -> Display {
     let mut gop =
         boot::open_protocol_exclusive::<GraphicsOutput>(handle).expect("open GOP");
 
-    let pick = PREFERRED.iter().find_map(|&(w, h)| {
-        gop.modes().find(|m| {
-            let info = m.info();
-            info.resolution() == (w, h)
-                && matches!(info.pixel_format(), PixelFormat::Bgr | PixelFormat::Rgb)
-        })
-    });
-    if let Some(mode) = pick {
-        gop.set_mode(&mode).expect("set GOP mode");
+    // On aarch64 (Raspberry Pi), the firmware's current mode is the one
+    // the VPU negotiated from the display's EDID — and demonstrably
+    // displays (the boot logo used it). The GOP mode list can advertise
+    // modes the display path won't sync (real-hardware finding: forcing
+    // 1280x720 blanked the monitor while NightRun kept running), so we
+    // never switch modes there. x86 keeps the preferred-mode selection.
+    if cfg!(target_arch = "x86_64") {
+        let pick = PREFERRED.iter().find_map(|&(w, h)| {
+            gop.modes().find(|m| {
+                let info = m.info();
+                info.resolution() == (w, h)
+                    && matches!(info.pixel_format(), PixelFormat::Bgr | PixelFormat::Rgb)
+            })
+        });
+        if let Some(mode) = pick {
+            gop.set_mode(&mode).expect("set GOP mode");
+        }
     }
 
     let info = gop.current_mode_info();
