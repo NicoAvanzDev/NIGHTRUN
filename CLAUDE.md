@@ -71,6 +71,12 @@ cargo run --release -p nrhost -- models/model.nrm --prompt "..." [--raw] \
   come from `scripts/gen_tokenizer_fixtures.py` + official HF tokenizers
   (with split_special_tokens=True — user text never encodes to control
   tokens); the Qwen chat template is pinned to `apply_chat_template`.
+- Prompt processing goes through `InferCtx::prefill_chunk` (batched, max
+  64 tokens/pass, bit-identical to sequential `forward` — pinned by
+  tests/prefill.rs); decode stays token-at-a-time. Model checksums are
+  verified *while* loading (`nr-model::verify::StreamingVerifier`) — there
+  is no post-load CRC pass. Chat commands: /clear (reset conversation,
+  keep model), /bye (UEFI shutdown).
 - No allocations in the generation loop: model tensors are zero-copy views
   into the loaded blob; KV cache + scratch come from the boot-time arena,
   sized from `InferCtx::required_bytes` — update it when adding buffers.

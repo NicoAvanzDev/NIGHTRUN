@@ -256,15 +256,18 @@ fn conventional_ram_mb() -> u32 {
     }
 }
 
-fn chat_loop(p: &mut Platform, surf: &mut nr_gfx::Surface) {
-    let mut turns: Vec<Turn> = Vec::new();
-    turns.push(Turn {
+fn intro_turn(model_name: &str) -> Turn {
+    Turn {
         role: Role::System,
         text: alloc::format!(
-            "{} resident in RAM - fully local inference, no OS underneath. Type a prompt; ESC stops a generation; UP/DOWN scroll history.",
-            p.model_name,
+            "{model_name} · resident in RAM · fully local, no OS underneath. Type a prompt;\nESC stops generation · UP/DOWN scroll history · /clear new conversation · /bye shut down"
         ),
-    });
+    }
+}
+
+fn chat_loop(p: &mut Platform, surf: &mut nr_gfx::Surface) {
+    let mut turns: Vec<Turn> = Vec::new();
+    turns.push(intro_turn(&p.model_name));
     let mut inputline = String::new();
     let mut frame = 0u32;
     let mut last_rate = 0u32;
@@ -282,14 +285,55 @@ fn chat_loop(p: &mut Platform, surf: &mut nr_gfx::Surface) {
                     inputline.pop();
                 }
                 InputEvent::Enter => {
-                    if !inputline.trim().is_empty() {
-                        let prompt = core::mem::take(&mut inputline);
-                        serial_println!("[chat] user: {}", prompt);
-                        turns.push(Turn { role: Role::User, text: prompt.clone() });
-                        scroll = 0; // jump back to live view for the reply
-                        last_rate = generate(p, surf, &prompt, &mut turns, &mut conversation_started, frame);
-                    } else {
-                        inputline.clear();
+                    let prompt = core::mem::take(&mut inputline);
+                    let trimmed = prompt.trim();
+                    scroll = 0;
+                    match trimmed {
+                        "" => {}
+                        "/clear" => {
+                            // Fresh conversation: transcript + KV position
+                            // reset; the model stays resident in RAM.
+                            turns.clear();
+                            turns.push(intro_turn(&p.model_name));
+                            turns.push(Turn {
+                                role: Role::System,
+                                text: String::from("New conversation started."),
+                            });
+                            p.infer.reset();
+                            conversation_started = false;
+                            p.pp_milli = 0;
+                            p.ftl_ms = 0;
+                            last_rate = 0;
+                            serial_println!("[chat] /clear - conversation reset (model resident)");
+                        }
+                        "/bye" => {
+                            turns.push(Turn {
+                                role: Role::System,
+                                text: String::from("Shutting down. Goodbye!"),
+                            });
+                            draw_chat(p, surf, &turns, "", frame, 0, false, 0);
+                            serial_println!("[chat] /bye - shutting down");
+                            stall_us(800_000);
+                            // Real UEFI power-off via runtime services.
+                            uefi::runtime::reset(
+                                uefi::runtime::ResetType::SHUTDOWN,
+                                uefi::Status::SUCCESS,
+                                None,
+                            );
+                        }
+                        cmd if cmd.starts_with('/') => {
+                            turns.push(Turn {
+                                role: Role::System,
+                                text: alloc::format!(
+                                    "unknown command {cmd} · /clear starts a new conversation · /bye shuts down"
+                                ),
+                            });
+                        }
+                        _ => {
+                            serial_println!("[chat] user: {}", trimmed);
+                            turns.push(Turn { role: Role::User, text: String::from(trimmed) });
+                            last_rate = generate(p, surf, trimmed, &mut turns, &mut conversation_started, frame);
+                        }
                     }
                 }
                 InputEvent::Up => scroll = scroll.saturating_add(3),

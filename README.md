@@ -107,7 +107,9 @@ contents.) Then boot the target machine from USB (F12/F10/Esc boot menu,
 UEFI mode, Secure Boot disabled).
 
 In the chat: type and press Enter; **ESC** stops a running generation;
-**Up/Down** (and PgUp/PgDn) scroll the conversation history.
+**Up/Down** (and PgUp/PgDn) scroll the conversation history;
+**`/clear`** starts a fresh conversation (model stays in RAM);
+**`/bye`** performs a real UEFI power-off.
 Serial console (COM1 115200) carries debug logs.
 
 ## How it works

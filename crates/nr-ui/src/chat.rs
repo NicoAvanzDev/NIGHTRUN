@@ -74,9 +74,10 @@ pub fn draw(
     scroll: usize,
 ) -> usize {
     surf.clear(theme::BG_DEEP);
+    let content_col = "user:".len().max(stats.assistant.len() + 1) + 1;
     status_bar(surf, fonts, stats);
-    input_bar(surf, fonts, input, cursor_on, stats.generating);
-    let scroll = scrollback(surf, fonts, turns, stats.generating, scroll, stats.assistant);
+    input_bar(surf, fonts, input, cursor_on, stats.generating, content_col);
+    let scroll = scrollback(surf, fonts, turns, stats.generating, scroll, stats.assistant, content_col);
     draw::scanlines(surf, 26);
     scroll
 }
@@ -145,7 +146,14 @@ fn status_bar(surf: &mut Surface, fonts: &Fonts, stats: &Stats) {
     draw::text(surf, f, rx, ty, &right, rate_col, 1, 0);
 }
 
-fn input_bar(surf: &mut Surface, fonts: &Fonts, input: &str, cursor_on: bool, generating: bool) {
+fn input_bar(
+    surf: &mut Surface,
+    fonts: &Fonts,
+    input: &str,
+    cursor_on: bool,
+    generating: bool,
+    content_col: usize,
+) {
     let w = surf.width as i32;
     let h = surf.height as i32;
     let y0 = h - INPUT_H;
@@ -158,8 +166,8 @@ fn input_bar(surf: &mut Surface, fonts: &Fonts, input: &str, cursor_on: bool, ge
         draw::text(surf, f, MARGIN, ty, ">> generating - press ESC to stop", theme::TEXT_DIM, 1, 0);
         return;
     }
-    draw::text(surf, f, MARGIN, ty, "user: ", theme::NEON_CYAN, 1, 0);
-    let tx = MARGIN + draw::text_width(f, "user: ", 1, 0);
+    draw::text(surf, f, MARGIN, ty, "user:", theme::NEON_CYAN, 1, 0);
+    let tx = MARGIN + content_col as i32 * f.width as i32;
 
     // Show the tail of the input if it overflows.
     let max_cols = ((w - tx - MARGIN - f.width as i32) / f.width as i32).max(1) as usize;
@@ -182,6 +190,7 @@ fn scrollback(
     generating: bool,
     scroll: usize,
     assistant: &str,
+    content_col: usize,
 ) -> usize {
     let f = &fonts.body;
     let w = surf.width as i32;
@@ -190,38 +199,43 @@ fn scrollback(
     let top = STATUS_H + 10;
     let bottom = h - INPUT_H - 10;
 
-    // Wrap all turns into (color, indent, line) records.
-    let mut lines: Vec<(u32, usize, String)> = Vec::new();
+    // All message text starts at one fixed content column, regardless of
+    // which label (user/llama/qwen/granite/none) precedes it.
+    let _ = assistant;
+    let body_cols = cols.saturating_sub(content_col).max(8);
+
+    // Wrap all turns into (label_color, body_color, label, body) records;
+    // continuation lines carry an empty label.
+    let mut lines: Vec<(u32, u32, String, String)> = Vec::new();
     for (i, turn) in turns.iter().enumerate() {
         if i > 0 {
-            lines.push((0, 0, String::new())); // blank separator
+            lines.push((0, 0, String::new(), String::new())); // separator
         }
-        let prefix = match turn.role {
-            Role::User => String::from("user: "),
+        let label = match turn.role {
+            Role::User => String::from("user:"),
             Role::Llama => {
                 let mut p = String::from(assistant);
-                p.push_str(": ");
+                p.push(':');
                 p
             }
             Role::System => String::new(),
         };
-        let indent = prefix.chars().count();
-        let body_cols = cols.saturating_sub(indent).max(8);
+        // System text keeps its accent color on every line; user/assistant
+        // bodies render in primary.
+        let body_color = match turn.role {
+            Role::System => turn.role.color(),
+            _ => theme::TEXT_PRIMARY,
+        };
         let streaming_tail = generating && i == turns.len() - 1 && turn.role == Role::Llama;
         let mut first = true;
         for line in wrap(&turn.text, body_cols, streaming_tail) {
-            if first {
-                let mut s = prefix.clone();
-                s.push_str(&line);
-                lines.push((turn.role.color(), 0, s));
-                first = false;
-            } else {
-                lines.push((theme::TEXT_PRIMARY, indent, line));
-            }
+            let l = if first { label.clone() } else { String::new() };
+            lines.push((turn.role.color(), body_color, l, line));
+            first = false;
         }
         if first {
-            // Empty turn (streaming just started): show bare prefix.
-            lines.push((turn.role.color(), 0, String::from(prefix.trim_end())));
+            // Empty turn (streaming just started): show the bare label.
+            lines.push((turn.role.color(), body_color, label, String::new()));
         }
     }
 
@@ -233,23 +247,13 @@ fn scrollback(
     let end = lines.len() - scroll;
     let start = end.saturating_sub(max_lines);
     let mut y = top;
-    for (color, indent, line) in &lines[start..end] {
-        if !line.is_empty() {
-            // Prefix in role color, continuation text in primary.
-            let mut assistant_prefix = String::from(assistant);
-            assistant_prefix.push(':');
-            let has_prefix =
-                *indent == 0 && (line.starts_with("user:") || line.starts_with(&assistant_prefix));
-            if has_prefix {
-                let split = line.find(' ').map(|i| i + 1).unwrap_or(line.len());
-                let (pre, rest) = line.split_at(split);
-                draw::text(surf, f, MARGIN, y, pre, *color, 1, 0);
-                draw::text(surf, f, MARGIN + draw::text_width(f, pre, 1, 0), y, rest, theme::TEXT_PRIMARY, 1, 0);
-            } else {
-                let x = MARGIN + *indent as i32 * f.width as i32;
-                let c = if *indent > 0 { theme::TEXT_PRIMARY } else { *color };
-                draw::text(surf, f, x, y, line, c, 1, 0);
-            }
+    let body_x = MARGIN + content_col as i32 * f.width as i32;
+    for (label_color, body_color, label, body) in &lines[start..end] {
+        if !label.is_empty() {
+            draw::text(surf, f, MARGIN, y, label, *label_color, 1, 0);
+        }
+        if !body.is_empty() {
+            draw::text(surf, f, body_x, y, body, *body_color, 1, 0);
         }
         y += line_h;
     }
