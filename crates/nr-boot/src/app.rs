@@ -129,6 +129,15 @@ fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx
     }
     stall_us(150_000);
 
+    // Pi 5: the fan is OS-managed and would otherwise stay off; run it
+    // at 100% for the whole session (no thermal management exists here).
+    #[cfg(target_arch = "aarch64")]
+    {
+        let fan = crate::fan::spin_up();
+        ui.show(0, 1000, if fan { "cooling fan: 100%" } else { "no fan control (RP1 not found)" });
+        stall_us(400_000);
+    }
+
     // Stage 1: memory scan.
     let ram_mb = conventional_ram_mb();
     ui.show(1, 1000, &alloc::format!("{ram_mb} MB conventional RAM"));

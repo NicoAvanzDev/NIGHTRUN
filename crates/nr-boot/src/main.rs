@@ -8,6 +8,8 @@ extern crate alloc;
 #[macro_use]
 pub mod serial;
 mod app;
+#[cfg(target_arch = "aarch64")]
+mod fan;
 mod input;
 mod modelload;
 mod smp;
