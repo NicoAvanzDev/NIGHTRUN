@@ -44,8 +44,4 @@ pub const LOGO_STOPS: &[(u32, u32)] = &[
 ];
 
 /// Ground gradient below the horizon.
-pub const GROUND_STOPS: &[(u32, u32)] = &[
-    (0, 0x2c0b45),
-    (350, 0x1b0630),
-    (1000, 0x090114),
-];
+pub const GROUND_STOPS: &[(u32, u32)] = &[(0, 0x2c0b45), (350, 0x1b0630), (1000, 0x090114)];

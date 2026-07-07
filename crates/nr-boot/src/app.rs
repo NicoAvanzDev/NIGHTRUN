@@ -19,13 +19,20 @@ use crate::video::Display;
 
 const CTX_LEN: usize = 4096;
 const MAX_GEN_TOKENS: usize = 768;
+/// Longest accepted prompt (chars). ~4 chars/token keeps this within
+/// what the context window could ever hold.
+const MAX_PROMPT_CHARS: usize = 8192;
 
 fn stall_us(us: u64) {
     boot::stall(Duration::from_micros(us));
 }
 
 /// CPU architecture as spoken text (platform crate, so cfg is fine here).
-const ARCH_NAME: &str = if cfg!(target_arch = "aarch64") { "ARM64" } else { "x86_64" };
+const ARCH_NAME: &str = if cfg!(target_arch = "aarch64") {
+    "ARM64"
+} else {
+    "x86_64"
+};
 
 fn system_prompt(model_name: &str) -> String {
     alloc::format!(
@@ -94,7 +101,13 @@ struct BootUi<'a> {
 
 impl BootUi<'_> {
     fn show(&mut self, current: usize, pm: u32, detail: &str) {
-        let st = LoadState { stages: STAGES, current, progress_pm: pm, detail, frame: self.frame };
+        let st = LoadState {
+            stages: STAGES,
+            current,
+            progress_pm: pm,
+            detail,
+            frame: self.frame,
+        };
         nr_ui::loading::draw(self.surf, self.fonts, &st);
         self.display.present(self.surf);
         self.frame += 1;
@@ -102,7 +115,13 @@ impl BootUi<'_> {
 
     fn fail(&mut self, message: &str) -> ! {
         serial_println!("[boot] FATAL: {}", message);
-        let st = LoadState { stages: STAGES, current: usize::MAX, progress_pm: 0, detail: message, frame: self.frame };
+        let st = LoadState {
+            stages: STAGES,
+            current: usize::MAX,
+            progress_pm: 0,
+            detail: message,
+            frame: self.frame,
+        };
         nr_ui::loading::draw(self.surf, self.fonts, &st);
         self.display.present(self.surf);
         loop {
@@ -111,9 +130,19 @@ impl BootUi<'_> {
     }
 }
 
-fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx::Surface) -> Platform {
+fn boot_sequence(
+    display: Display,
+    fonts: Fonts,
+    clock: Clock,
+    surf: &mut nr_gfx::Surface,
+) -> Platform {
     let t_boot = clock.now();
-    let mut ui = BootUi { display: &display, surf, fonts: &fonts, frame: 0 };
+    let mut ui = BootUi {
+        display: &display,
+        surf,
+        fonts: &fonts,
+        frame: 0,
+    };
 
     // Stage 0: runtime init (SIMD + multi-core bring-up).
     ui.show(0, 300, "TSC clock calibrated");
@@ -125,7 +154,15 @@ fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx
         ui.show(0, 1000, &alloc::format!("single core ({smp_note})"));
         stall_us(1_500_000);
     } else {
-        ui.show(0, 1000, &alloc::format!("{} cores online ({} inference workers)", workers + 1, workers));
+        ui.show(
+            0,
+            1000,
+            &alloc::format!(
+                "{} cores online ({} inference workers)",
+                workers + 1,
+                workers
+            ),
+        );
     }
     stall_us(150_000);
 
@@ -134,7 +171,15 @@ fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx
     #[cfg(target_arch = "aarch64")]
     {
         let fan = crate::fan::spin_up();
-        ui.show(0, 1000, if fan { "cooling fan: 100%" } else { "no fan control (RP1 not found)" });
+        ui.show(
+            0,
+            1000,
+            if fan {
+                "cooling fan: 100%"
+            } else {
+                "no fan control (RP1 not found)"
+            },
+        );
         stall_us(400_000);
     }
 
@@ -154,12 +199,16 @@ fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx
                 let ms = clock.ticks_to_ms(clock.now() - t0).max(1);
                 done as u64 * 1000 / ms / (1024 * 1024)
             };
-            ui.show(2, pm, &alloc::format!(
-                "{} / {} MB  ({} MB/s, CRC32 inline)",
-                done / (1024 * 1024),
-                total / (1024 * 1024),
-                mbs
-            ));
+            ui.show(
+                2,
+                pm,
+                &alloc::format!(
+                    "{} / {} MB  ({} MB/s, CRC32 inline)",
+                    done / (1024 * 1024),
+                    total / (1024 * 1024),
+                    mbs
+                ),
+            );
         };
         match crate::modelload::load(&mut cb) {
             Ok(buf) => buf,
@@ -209,7 +258,11 @@ fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx
     for off in (0..arena_bytes).step_by(16 * 1024 * 1024) {
         let len = (16 * 1024 * 1024).min(arena_bytes - off);
         unsafe { core::ptr::write_bytes(base.as_ptr().add(off), 0, len) };
-        ui.show(3, ((off + len) * 500 / arena_bytes) as u32, &alloc::format!("{arena_mb} MB resident arena"));
+        ui.show(
+            3,
+            ((off + len) * 500 / arena_bytes) as u32,
+            &alloc::format!("{arena_mb} MB resident arena"),
+        );
     }
 
     // The model must outlive the InferCtx that borrows it; both live for
@@ -221,7 +274,15 @@ fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx
             .map(|s| s.as_mut_ptr())
             .unwrap_or(core::ptr::null_mut())
     };
-    ui.show(3, 750, &alloc::format!("KV cache + scratch ({} MB, ctx {})", need / (1024 * 1024), CTX_LEN));
+    ui.show(
+        3,
+        750,
+        &alloc::format!(
+            "KV cache + scratch ({} MB, ctx {})",
+            need / (1024 * 1024),
+            CTX_LEN
+        ),
+    );
     let infer = match InferCtx::new(model, CTX_LEN, &mut alloc_cb) {
         Ok(i) => i,
         Err(e) => ui.fail(&alloc::format!("inference init failed: {e:?}")),
@@ -232,7 +293,11 @@ fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx
     // Stage 5: done.
     let boot_ms = clock.ticks_to_ms(clock.now() - t_boot);
     serial_println!("[boot] chat-ready in {} ms (after splash)", boot_ms);
-    ui.show(4, 1000, &alloc::format!("boot sequence {}.{}s", boot_ms / 1000, boot_ms % 1000 / 100));
+    ui.show(
+        4,
+        1000,
+        &alloc::format!("boot sequence {}.{}s", boot_ms / 1000, boot_ms % 1000 / 100),
+    );
     stall_us(400_000);
 
     // The converter writes the full display name incl. quant label.
@@ -296,9 +361,13 @@ fn chat_loop(p: &mut Platform, surf: &mut nr_gfx::Surface) {
             dirty = true;
             match ev {
                 InputEvent::Char(c) => {
-                    let b = byte_at(&inputline, caret);
-                    inputline.insert(b, c);
-                    caret += 1;
+                    // Bound the prompt: the context window can't use more
+                    // anyway, and unbounded growth is a memory hazard.
+                    if inputline.chars().count() < MAX_PROMPT_CHARS {
+                        let b = byte_at(&inputline, caret);
+                        inputline.insert(b, c);
+                        caret += 1;
+                    }
                 }
                 InputEvent::Backspace => {
                     if caret > 0 {
@@ -363,8 +432,18 @@ fn chat_loop(p: &mut Platform, surf: &mut nr_gfx::Surface) {
                         }
                         _ => {
                             serial_println!("[chat] user: {}", trimmed);
-                            turns.push(Turn { role: Role::User, text: String::from(trimmed) });
-                            last_rate = generate(p, surf, trimmed, &mut turns, &mut conversation_started, frame);
+                            turns.push(Turn {
+                                role: Role::User,
+                                text: String::from(trimmed),
+                            });
+                            last_rate = generate(
+                                p,
+                                surf,
+                                trimmed,
+                                &mut turns,
+                                &mut conversation_started,
+                                frame,
+                            );
                         }
                     }
                 }
@@ -377,7 +456,9 @@ fn chat_loop(p: &mut Platform, surf: &mut nr_gfx::Surface) {
         }
 
         if dirty || frame % 8 == 0 {
-            scroll = draw_chat(p, surf, &turns, &inputline, caret, frame, last_rate, false, scroll);
+            scroll = draw_chat(
+                p, surf, &turns, &inputline, caret, frame, last_rate, false, scroll,
+            );
         }
         frame = frame.wrapping_add(1);
         stall_us(16_000);
@@ -407,13 +488,19 @@ fn generate(
     // Build this turn's token sequence (Llama-3 instruct template).
     let mut ids: Vec<u32> = Vec::new();
     if !*conversation_started {
-        p.tokenizer.encode_conversation_start(Some(&system_prompt(&p.model_name)), &mut ids);
+        p.tokenizer
+            .encode_conversation_start(Some(&system_prompt(&p.model_name)), &mut ids);
         *conversation_started = true;
     }
-    p.tokenizer.encode_message(nr_token::template::ROLE_USER, prompt, &mut ids);
-    p.tokenizer.encode_header(nr_token::template::ROLE_ASSISTANT, &mut ids);
+    p.tokenizer
+        .encode_message(nr_token::template::ROLE_USER, prompt, &mut ids);
+    p.tokenizer
+        .encode_header(nr_token::template::ROLE_ASSISTANT, &mut ids);
 
-    turns.push(Turn { role: Role::Llama, text: String::new() });
+    turns.push(Turn {
+        role: Role::Llama,
+        text: String::new(),
+    });
 
     // Batched prefill. Chunks of 16 (not MAX_BATCH): each chunk boundary
     // is a redraw, which is what makes the thinking cursor blink while
@@ -449,9 +536,10 @@ fn generate(
         let logits = p.infer.logits();
         p.sampler.sample(logits)
     };
-    while !p.tokenizer.is_stop(next) && produced < MAX_GEN_TOKENS as u64 && p.infer.remaining() > 0 {
+    while !p.tokenizer.is_stop(next) && produced < MAX_GEN_TOKENS as u64 && p.infer.remaining() > 0
+    {
         utf8_pending.extend_from_slice(p.tokenizer.token_bytes(next));
-        flush_utf8(&mut utf8_pending, &mut turns.last_mut().unwrap().text);
+        nr_token::flush_utf8(&mut utf8_pending, &mut turns.last_mut().unwrap().text);
 
         produced += 1;
         rate = p.clock.rate_milli(produced, p.clock.now() - t0);
@@ -484,27 +572,12 @@ fn generate(
     rate
 }
 
-/// Move complete UTF-8 prefixes of `pending` into `out` (token boundaries
-/// can split multi-byte characters).
-fn flush_utf8(pending: &mut Vec<u8>, out: &mut String) {
-    match core::str::from_utf8(pending) {
-        Ok(s) => {
-            out.push_str(s);
-            pending.clear();
-        }
-        Err(e) => {
-            let ok = e.valid_up_to();
-            if ok > 0 {
-                out.push_str(core::str::from_utf8(&pending[..ok]).unwrap());
-                pending.drain(..ok);
-            }
-        }
-    }
-}
-
 /// Char index -> byte offset for caret edits (prompt text is UTF-8).
 fn byte_at(s: &str, char_idx: usize) -> usize {
-    s.char_indices().nth(char_idx).map(|(b, _)| b).unwrap_or(s.len())
+    s.char_indices()
+        .nth(char_idx)
+        .map(|(b, _)| b)
+        .unwrap_or(s.len())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -534,9 +607,14 @@ fn draw_chat(
     };
     // Blink cadence: idle frames tick at ~60 Hz (divide down); generation
     // frames tick per prefill chunk / decoded token (toggle each redraw).
-    let cursor_on = if generating { frame % 2 == 0 } else { (frame / 16) % 2 == 0 };
-    let scroll = nr_ui::chat::draw(surf, &p.fonts, turns, input, caret, cursor_on, &stats, scroll);
+    let cursor_on = if generating {
+        frame % 2 == 0
+    } else {
+        (frame / 16) % 2 == 0
+    };
+    let scroll = nr_ui::chat::draw(
+        surf, &p.fonts, turns, input, caret, cursor_on, &stats, scroll,
+    );
     p.display.present(surf);
     scroll
 }
-

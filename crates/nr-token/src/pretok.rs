@@ -69,7 +69,7 @@ fn match_one(s: &str, style: Style) -> usize {
             b's' | b't' | b'm' | b'd' => return 2,
             c1 @ (b'r' | b'v' | b'l') if s.len() >= 3 => {
                 let c2 = b[2].to_ascii_lowercase();
-                if (c1 == b'r' && c2 == b'e') || (c1 == b'v' && c2 == b'e') || (c1 == b'l' && c2 == b'l') {
+                if matches!((c1, c2), (b'r', b'e') | (b'v', b'e') | (b'l', b'l')) {
                     return 3;
                 }
             }

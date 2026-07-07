@@ -24,13 +24,19 @@ fn main() {
             build_and_stage(arch_flag(&args));
         }
         Some("image") => {
-            let model = args.iter().position(|a| a == "--model").map(|i| args[i + 1].clone());
+            let model = args
+                .iter()
+                .position(|a| a == "--model")
+                .map(|i| args[i + 1].clone());
             build_image(true, model.as_deref(), arch_flag(&args));
         }
         Some("run") => run(parse_run_opts(&args[1..])),
         Some("bench") => bench(),
         Some("pi-image") => {
-            let model = args.iter().position(|a| a == "--model").map(|i| args[i + 1].clone());
+            let model = args
+                .iter()
+                .position(|a| a == "--model")
+                .map(|i| args[i + 1].clone());
             pi_image(model.as_deref());
         }
         _ => {
@@ -45,23 +51,40 @@ fn main() {
 fn bench() {
     let root = root();
     let opts = parse_run_opts(
-        &["--img", "--mem", "4G", "--smp", "8", "--secs", "150", "--keys",
-          "35:Explain what a rotary positional embedding is in two sentences.\\n"]
-            .map(String::from),
+        &[
+            "--img",
+            "--mem",
+            "4G",
+            "--smp",
+            "8",
+            "--secs",
+            "150",
+            "--keys",
+            "35:Explain what a rotary positional embedding is in two sentences.\\n",
+        ]
+        .map(String::from),
     );
     run(opts);
 
     let log = std::fs::read_to_string(root.join("target/serial.log")).expect("serial log");
     let grab = |pat: &str| -> Option<String> {
-        log.lines().find(|l| l.contains(pat)).map(|l| l.trim().to_string())
+        log.lines()
+            .find(|l| l.contains(pat))
+            .map(|l| l.trim().to_string())
     };
     let mut out = String::from("# NightRun benchmarks (measured)\n\n");
     out.push_str("Environment: QEMU q35, KVM, `-cpu max -smp 8 -m 4G`, OVMF; ");
     out.push_str(&format!(
         "host: {} hardware threads.\nDate: {}\n\n```\n",
-        std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0),
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(0),
         String::from_utf8_lossy(
-            &Command::new("date").arg("+%Y-%m-%d").output().unwrap().stdout
+            &Command::new("date")
+                .arg("+%Y-%m-%d")
+                .output()
+                .unwrap()
+                .stdout
         )
         .trim(),
     ));
@@ -114,7 +137,9 @@ fn build_image(fresh: bool, model_arg: Option<&str>, arch: Arch) -> PathBuf {
             format!("{}|{sz}", m.display())
         })
         .unwrap_or_default();
-    let same_model = std::fs::read_to_string(&sidecar).map(|s| s == stamp).unwrap_or(false);
+    let same_model = std::fs::read_to_string(&sidecar)
+        .map(|s| s == stamp)
+        .unwrap_or(false);
 
     if !fresh && same_model && img.exists() && image::update_efi(&img, &efi, arch.boot_file()) {
         println!("updated {} in {}", arch.boot_file(), img.display());
@@ -154,7 +179,10 @@ fn arch_flag(args: &[String]) -> Arch {
 }
 
 fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .unwrap()
 }
 
 fn build_and_stage(arch: Arch) -> (PathBuf, PathBuf) {
@@ -188,7 +216,14 @@ fn build_and_stage(arch: Arch) -> (PathBuf, PathBuf) {
             // toolchain, no build-std.
             let status = Command::new("cargo")
                 .current_dir(&root)
-                .args(["build", "--release", "-p", "nr-boot", "--target", "aarch64-unknown-uefi"])
+                .args([
+                    "build",
+                    "--release",
+                    "-p",
+                    "nr-boot",
+                    "--target",
+                    "aarch64-unknown-uefi",
+                ])
                 .status()
                 .expect("run cargo (rustup target add aarch64-unknown-uefi)");
             assert!(status.success(), "nr-boot aarch64 build failed");
@@ -310,8 +345,14 @@ fn run(opts: RunOpts) {
                 .args(["-cpu", "max"])
                 .args(["-m", opts.mem.as_deref().unwrap_or("2G")])
                 .args(["-smp", opts.smp.as_deref().unwrap_or("8")])
-                .args(["-drive", &format!("if=pflash,format=raw,readonly=on,file={ovmf_code}")])
-                .args(["-drive", &format!("if=pflash,format=raw,file={}", vars.display())])
+                .args([
+                    "-drive",
+                    &format!("if=pflash,format=raw,readonly=on,file={ovmf_code}"),
+                ])
+                .args([
+                    "-drive",
+                    &format!("if=pflash,format=raw,file={}", vars.display()),
+                ])
                 .args(["-drive", &boot_drive]);
         }
         Arch::Aarch64 => {
@@ -328,8 +369,14 @@ fn run(opts: RunOpts) {
                 .args(["-cpu", "cortex-a76"])
                 .args(["-m", opts.mem.as_deref().unwrap_or("3G")])
                 .args(["-smp", opts.smp.as_deref().unwrap_or("4")])
-                .args(["-drive", &format!("if=pflash,format=raw,readonly=on,file=/usr/share/AAVMF/AAVMF_CODE.fd")])
-                .args(["-drive", &format!("if=pflash,format=raw,file={}", vars.display())])
+                .args([
+                    "-drive",
+                    "if=pflash,format=raw,readonly=on,file=/usr/share/AAVMF/AAVMF_CODE.fd",
+                ])
+                .args([
+                    "-drive",
+                    &format!("if=pflash,format=raw,file={}", vars.display()),
+                ])
                 // ramfb: plain linear framebuffer through AAVMF's GOP
                 // (virtio-gpu is Blt-only, which NightRun's direct-write
                 // renderer rejects; the Pi's real GOP is linear).
@@ -340,13 +387,23 @@ fn run(opts: RunOpts) {
         }
     }
     cmd.args(["-serial", &format!("file:{}", serial_log.display())])
-        .args(["-qmp", &format!("unix:{},server=on,wait=off", qmp_sock.display())])
+        .args([
+            "-qmp",
+            &format!("unix:{},server=on,wait=off", qmp_sock.display()),
+        ])
         .args(["-monitor", "none"]);
     if !opts.window {
         cmd.arg("-display").arg("none");
     }
-    println!("qemu: {:?}", cmd.get_args().collect::<Vec<_>>().join(" ".as_ref()));
-    let mut child = cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit()).spawn().expect("spawn qemu");
+    println!(
+        "qemu: {:?}",
+        cmd.get_args().collect::<Vec<_>>().join(" ".as_ref())
+    );
+    let mut child = cmd
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("spawn qemu");
 
     let mut qmp = Qmp::connect(&qmp_sock, Duration::from_secs(10));
 
@@ -445,7 +502,10 @@ impl Qmp {
             }
         };
         let writer = stream.try_clone().unwrap();
-        let mut qmp = Qmp { reader: BufReader::new(stream), writer };
+        let mut qmp = Qmp {
+            reader: BufReader::new(stream),
+            writer,
+        };
         qmp.read_line(); // greeting
         qmp.cmd(r#"{"execute":"qmp_capabilities"}"#);
         Some(qmp)

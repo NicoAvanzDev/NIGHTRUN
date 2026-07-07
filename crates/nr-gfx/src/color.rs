@@ -7,7 +7,11 @@ pub const fn rgb(r: u8, g: u8, b: u8) -> u32 {
 
 #[inline]
 pub const fn channels(c: u32) -> (u8, u8, u8) {
-    (((c >> 16) & 0xff) as u8, ((c >> 8) & 0xff) as u8, (c & 0xff) as u8)
+    (
+        ((c >> 16) & 0xff) as u8,
+        ((c >> 8) & 0xff) as u8,
+        (c & 0xff) as u8,
+    )
 }
 
 /// Linear interpolation between two colors, `t` in 0..=256 (fixed point).
@@ -16,9 +20,7 @@ pub fn lerp(a: u32, b: u32, t: u32) -> u32 {
     let t = t.min(256);
     let (ar, ag, ab) = channels(a);
     let (br, bg, bb) = channels(b);
-    let mix = |x: u8, y: u8| -> u8 {
-        (((x as u32) * (256 - t) + (y as u32) * t) >> 8) as u8
-    };
+    let mix = |x: u8, y: u8| -> u8 { (((x as u32) * (256 - t) + (y as u32) * t) >> 8) as u8 };
     rgb(mix(ar, br), mix(ag, bg), mix(ab, bb))
 }
 

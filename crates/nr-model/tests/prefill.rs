@@ -23,7 +23,10 @@ fn check_model(file: &str) {
     // covering the batch path; ~70 tokens also exercises MAX_BATCH=64
     // chunking via prefill().
     let mut ids: Vec<u32> = Vec::new();
-    tok.encode_conversation_start(Some("You are a helpful assistant. Answer concisely and clearly whenever possible."), &mut ids);
+    tok.encode_conversation_start(
+        Some("You are a helpful assistant. Answer concisely and clearly whenever possible."),
+        &mut ids,
+    );
     tok.encode_message(
         nr_token::template::ROLE_USER,
         "Explain, in about three sentences, why the sky appears blue during the day and red at \
@@ -33,7 +36,11 @@ fn check_model(file: &str) {
         &mut ids,
     );
     tok.encode_header(nr_token::template::ROLE_ASSISTANT, &mut ids);
-    assert!(ids.len() > nr_model::infer::MAX_BATCH, "prompt must span chunks ({})", ids.len());
+    assert!(
+        ids.len() > nr_model::infer::MAX_BATCH,
+        "prompt must span chunks ({})",
+        ids.len()
+    );
 
     // Sequential reference.
     let mut seq = nr_model::InferCtx::new(&model, 256, &mut alloc).expect("ctx");
@@ -48,12 +55,18 @@ fn check_model(file: &str) {
     let mut bat = nr_model::InferCtx::new(&model, 256, &mut alloc).expect("ctx");
     let bat_logits = bat.prefill(&ids).to_vec();
     assert_eq!(bat.pos, ids.len());
-    assert_eq!(seq_logits, bat_logits, "{file}: prefill logits differ from sequential");
+    assert_eq!(
+        seq_logits, bat_logits,
+        "{file}: prefill logits differ from sequential"
+    );
 
     // The KV cache must be identical too: the next decode step must match
     // bit-for-bit.
     let bat_logits2 = bat.forward(seq_next).to_vec();
-    assert_eq!(seq_logits2, bat_logits2, "{file}: post-prefill decode differs");
+    assert_eq!(
+        seq_logits2, bat_logits2,
+        "{file}: post-prefill decode differs"
+    );
 }
 
 #[test]

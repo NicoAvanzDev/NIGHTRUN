@@ -43,9 +43,9 @@ fn stars(surf: &mut Surface, horizon: i32) {
     for _ in 0..count {
         let x = (rng.next() % w) as i32;
         let y = (rng.next() % (horizon as u32 * 3 / 4)) as i32;
-        let b = 90 + (rng.next() % 130) as u32;
+        let b = 90 + (rng.next() % 130);
         surf.blend(x, y, 0xdcd6ff, b);
-        if rng.next() % 7 == 0 {
+        if rng.next().is_multiple_of(7) {
             surf.blend(x + 1, y, 0xdcd6ff, b / 3);
             surf.blend(x - 1, y, 0xdcd6ff, b / 3);
             surf.blend(x, y + 1, 0xdcd6ff, b / 3);
@@ -117,10 +117,14 @@ fn grid(surf: &mut Surface, horizon: i32) {
 
 fn isqrt(v: u32) -> u32 {
     let mut x = v;
-    let mut y = (x + 1) / 2;
+    let mut y = x.div_ceil(2);
     while y < x {
         x = y;
         y = (x + v / x) / 2;
     }
-    if v == 0 { 0 } else { x }
+    if v == 0 {
+        0
+    } else {
+        x
+    }
 }

@@ -109,7 +109,11 @@ impl<'a> Cur<'a> {
         u64::from_le_bytes(self.take(8).try_into().unwrap())
     }
     fn str(&mut self, version: u32) -> String {
-        let len = if version >= 2 { self.u64() as usize } else { self.u32() as usize };
+        let len = if version >= 2 {
+            self.u64() as usize
+        } else {
+            self.u32() as usize
+        };
         String::from_utf8_lossy(self.take(len)).into_owned()
     }
     fn value(&mut self, ty: u32, version: u32) -> Value {
@@ -125,7 +129,11 @@ impl<'a> Cur<'a> {
             8 => Value::Str(self.str(version)),
             9 => {
                 let elem_ty = self.u32();
-                let count = if version >= 2 { self.u64() as usize } else { self.u32() as usize };
+                let count = if version >= 2 {
+                    self.u64() as usize
+                } else {
+                    self.u32() as usize
+                };
                 let mut v = Vec::with_capacity(count);
                 for _ in 0..count {
                     v.push(self.value(elem_ty, version));
@@ -145,7 +153,10 @@ pub fn parse(path: &str) -> Gguf {
     let mut c = Cur { b: &data, pos: 0 };
     assert_eq!(c.take(4), b"GGUF", "not a GGUF file");
     let version = c.u32();
-    assert!((2..=3).contains(&version), "unsupported GGUF version {version}");
+    assert!(
+        (2..=3).contains(&version),
+        "unsupported GGUF version {version}"
+    );
     let n_tensors = c.u64();
     let n_kv = c.u64();
 
@@ -175,7 +186,12 @@ pub fn parse(path: &str) -> Gguf {
         let dims: Vec<u64> = (0..n_dims).map(|_| c.u64()).collect();
         let dtype = c.u32();
         let rel_offset = c.u64();
-        raw.push(RawInfo { name, dims, dtype, rel_offset });
+        raw.push(RawInfo {
+            name,
+            dims,
+            dtype,
+            rel_offset,
+        });
     }
     let data_start = (c.pos as u64).div_ceil(alignment) * alignment;
 

@@ -70,7 +70,12 @@ fn enable_simd() {
         return;
     }
     let f = nr_tensor::cpu::features();
-    serial_println!("[cpu] avx enabled; avx2={} fma={} f16c={}", f.avx2, f.fma, f.f16c);
+    serial_println!(
+        "[cpu] avx enabled; avx2={} fma={} f16c={}",
+        f.avx2,
+        f.fma,
+        f.f16c
+    );
 }
 
 /// NEON is architecturally baseline on aarch64 UEFI (hard-float target);
@@ -79,7 +84,11 @@ fn enable_simd() {
 fn enable_simd() {
     enable_simd_quiet();
     let f = nr_tensor::cpu::features();
-    serial_println!("[cpu] aarch64 neon baseline; dotprod={} fp16={}", f.dotprod, f.fp16);
+    serial_println!(
+        "[cpu] aarch64 neon baseline; dotprod={} fp16={}",
+        f.dotprod,
+        f.fp16
+    );
 }
 
 /// Un-trap FP/SIMD at whichever EL the firmware runs us (the aarch64
@@ -194,9 +203,15 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     if !fb_ptr.is_null() {
         // SAFETY: set once from a leaked box; framebuffer stays mapped.
         let fb = unsafe { &*fb_ptr };
-        let mut msg = PanicBuf { buf: [0; 512], len: 0 };
+        let mut msg = PanicBuf {
+            buf: [0; 512],
+            len: 0,
+        };
         let _ = write!(msg, "{}", info);
-        draw_panic_screen(fb, core::str::from_utf8(&msg.buf[..msg.len]).unwrap_or("panic"));
+        draw_panic_screen(
+            fb,
+            core::str::from_utf8(&msg.buf[..msg.len]).unwrap_or("panic"),
+        );
     }
 
     loop {
@@ -222,14 +237,28 @@ pub fn halt() {
 fn draw_panic_screen(fb: &nr_gfx::direct::DirectFb, msg: &str) {
     use nr_gfx::theme;
     static SMALL: &[u8] = include_bytes!("../../../assets/fonts/spleen-8x16.psfu");
-    let Some(font) = nr_gfx::PsfFont::parse(SMALL) else { return };
+    let Some(font) = nr_gfx::PsfFont::parse(SMALL) else {
+        return;
+    };
 
     fb.fill_rect(0, 0, fb.width, fb.height, 0x12021c);
     let band_y = fb.height / 4;
     fb.fill_rect(0, band_y, fb.width, 4, theme::NEON_MAGENTA);
     fb.fill_rect(0, band_y + 90, fb.width, 4, theme::NEON_MAGENTA);
-    fb.text(&font, 48, band_y + 28, "NIGHTRUN // SYSTEM FAULT", theme::NEON_MAGENTA);
-    fb.text(&font, 48, band_y + 56, "the runtime hit an unrecoverable error - power cycle to restart", theme::TEXT_DIM);
+    fb.text(
+        &font,
+        48,
+        band_y + 28,
+        "NIGHTRUN // SYSTEM FAULT",
+        theme::NEON_MAGENTA,
+    );
+    fb.text(
+        &font,
+        48,
+        band_y + 56,
+        "the runtime hit an unrecoverable error - power cycle to restart",
+        theme::TEXT_DIM,
+    );
 
     // Wrapped panic message.
     let cols = (fb.width - 96) / font.width;

@@ -58,8 +58,14 @@ impl StreamingVerifier {
 
         // The meta region is contiguous in practice (header | tok | table),
         // which streaming relies on; validate that shape.
-        let table_end = table_off + tensor_count * crate::format::ENTRY_SIZE;
-        if tok_off != HEADER_SIZE || table_off != tok_off + tok_size || table_end > data_off {
+        let table_end = tensor_count
+            .checked_mul(crate::format::ENTRY_SIZE)
+            .and_then(|len| table_off.checked_add(len))
+            .ok_or(VerifyError::BadHeader)?;
+        let tok_end = tok_off
+            .checked_add(tok_size)
+            .ok_or(VerifyError::BadHeader)?;
+        if tok_off != HEADER_SIZE || table_off != tok_end || table_end > data_off {
             return Err(VerifyError::BadHeader);
         }
 

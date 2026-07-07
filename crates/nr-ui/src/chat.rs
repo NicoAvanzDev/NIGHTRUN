@@ -64,6 +64,7 @@ const INPUT_H: i32 = 46;
 /// Draw the chat screen. `scroll` is how many lines the view is scrolled
 /// up from the newest; the clamped value is returned so callers can keep
 /// their scroll state within range.
+#[allow(clippy::too_many_arguments)] // flat screen-state API is deliberate
 pub fn draw(
     surf: &mut Surface,
     fonts: &Fonts,
@@ -79,7 +80,14 @@ pub fn draw(
     status_bar(surf, fonts, stats);
     input_bar(surf, fonts, input, caret, cursor_on, stats.generating);
     let scroll = scrollback(
-        surf, fonts, turns, stats.generating, cursor_on, scroll, stats.assistant, content_col,
+        surf,
+        fonts,
+        turns,
+        stats.generating,
+        cursor_on,
+        scroll,
+        stats.assistant,
+        content_col,
     );
     draw::scanlines(surf, 26);
     scroll
@@ -97,7 +105,11 @@ fn status_bar(surf: &mut Surface, fonts: &Fonts, stats: &Stats) {
     // Sunset separator line.
     for x in 0..w {
         let c = nr_gfx::color::gradient(
-            &[(0, theme::NEON_CYAN), (500, theme::NEON_MAGENTA), (1000, theme::NEON_ORANGE)],
+            &[
+                (0, theme::NEON_CYAN),
+                (500, theme::NEON_MAGENTA),
+                (1000, theme::NEON_ORANGE),
+            ],
             x as u32 * 1000 / w.max(1) as u32,
         );
         surf.fill_rect(x, STATUS_H - 2, 1, 2, c);
@@ -105,7 +117,18 @@ fn status_bar(surf: &mut Surface, fonts: &Fonts, stats: &Stats) {
 
     let f = &fonts.small;
     let ty = (STATUS_H - f.height as i32) / 2 - 1;
-    draw::text_glow(surf, f, MARGIN, ty, "NIGHTRUN", 1, 2, 0, theme::NEON_MAGENTA, 2);
+    draw::text_glow(
+        surf,
+        f,
+        MARGIN,
+        ty,
+        "NIGHTRUN",
+        1,
+        2,
+        0,
+        theme::NEON_MAGENTA,
+        2,
+    );
     draw::text(surf, f, MARGIN, ty, "NIGHTRUN", theme::TEXT_PRIMARY, 1, 2);
 
     let model_x = MARGIN + draw::text_width(f, "NIGHTRUN", 1, 2) + 28;
@@ -145,7 +168,11 @@ fn status_bar(surf: &mut Surface, fonts: &Fonts, stats: &Stats) {
         right.push_str("idle");
     }
     let rx = surf.width as i32 - MARGIN - draw::text_width(f, &right, 1, 0);
-    let rate_col = if stats.generating { theme::NEON_YELLOW } else { theme::TEXT_DIM };
+    let rate_col = if stats.generating {
+        theme::NEON_YELLOW
+    } else {
+        theme::TEXT_DIM
+    };
     draw::text(surf, f, rx, ty, &right, rate_col, 1, 0);
 }
 
@@ -166,7 +193,16 @@ fn input_bar(
     let f = &fonts.body;
     let ty = y0 + (INPUT_H - f.height as i32) / 2;
     if generating {
-        draw::text(surf, f, MARGIN, ty, ">> generating - press ESC to stop", theme::TEXT_DIM, 1, 0);
+        draw::text(
+            surf,
+            f,
+            MARGIN,
+            ty,
+            ">> generating - press ESC to stop",
+            theme::TEXT_DIM,
+            1,
+            0,
+        );
         return;
     }
     // Input follows the label after a single standard space (unlike the
@@ -179,13 +215,23 @@ fn input_bar(
     let chars: Vec<char> = input.chars().collect();
     let caret = caret.min(chars.len());
     let max_cols = ((w - tx - MARGIN - f.width as i32) / f.width as i32).max(1) as usize;
-    let start = if caret >= max_cols { caret + 1 - max_cols } else { 0 };
+    let start = if caret >= max_cols {
+        caret + 1 - max_cols
+    } else {
+        0
+    };
     let end = (start + max_cols).min(chars.len());
     let shown: String = chars[start..end].iter().collect();
     draw::text(surf, f, tx, ty, &shown, theme::TEXT_PRIMARY, 1, 0);
     if cursor_on {
         let cx = tx + (caret - start) as i32 * f.width as i32;
-        surf.fill_rect(cx, ty + 2, f.width as i32 - 2, f.height as i32 - 4, theme::NEON_CYAN);
+        surf.fill_rect(
+            cx,
+            ty + 2,
+            f.width as i32 - 2,
+            f.height as i32 - 4,
+            theme::NEON_CYAN,
+        );
         if caret < chars.len() {
             // Character under the cursor, inverted.
             let under: String = chars[caret..caret + 1].iter().collect();
@@ -194,6 +240,7 @@ fn input_bar(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // flat screen-state API is deliberate
 fn scrollback(
     surf: &mut Surface,
     fonts: &Fonts,
@@ -248,7 +295,13 @@ fn scrollback(
         }
         if first {
             // Empty turn (streaming just started): show the bare label.
-            lines.push((turn.role.color(), body_color, label, String::new(), at_margin));
+            lines.push((
+                turn.role.color(),
+                body_color,
+                label,
+                String::new(),
+                at_margin,
+            ));
         }
     }
 
@@ -278,7 +331,9 @@ fn scrollback(
     // input field shows the generating notice for the whole duration, and
     // the cursor returns there when the reply completes.
     let thinking = generating
-        && turns.last().is_some_and(|t| t.role == Role::Llama && t.text.is_empty());
+        && turns
+            .last()
+            .is_some_and(|t| t.role == Role::Llama && t.text.is_empty());
     if thinking && cursor_on && scroll == 0 && end > start {
         let cy = y - line_h;
         if cy + line_h <= bottom {
@@ -310,6 +365,11 @@ fn scrollback(
 
 /// Word wrap to `cols` columns.
 fn wrap(text: &str, cols: usize) -> Vec<String> {
+    // Degenerate surfaces (cols == 0) must not loop forever in
+    // push_word's chunking; render nothing instead.
+    if cols == 0 {
+        return Vec::new();
+    }
     let mut out: Vec<String> = Vec::new();
     for para in text.split('\n') {
         let mut line = String::new();

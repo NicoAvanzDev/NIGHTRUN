@@ -79,7 +79,13 @@ pub fn init() -> Display {
         info.pixel_format()
     );
 
-    let display = Display { width, height, stride: info.stride(), layout, fb };
+    let display = Display {
+        width,
+        height,
+        stride: info.stride(),
+        layout,
+        fb,
+    };
     // Keep the protocol open (exclusively) for the rest of the session so
     // nothing else redraws the screen.
     core::mem::forget(gop);

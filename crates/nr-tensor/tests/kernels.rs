@@ -1,6 +1,6 @@
-use nr_tensor::kernels::{dot_q8_scalar, matvec_q8};
 #[cfg(target_arch = "x86_64")]
 use nr_tensor::kernels::dot_q8_avx2;
+use nr_tensor::kernels::{dot_q8_scalar, matvec_q8};
 use nr_tensor::q8::{self, BlockQ8_0, QK8_0};
 use nr_tensor::rope::{self, Llama3Scaling};
 use nr_tensor::vec;
@@ -29,7 +29,13 @@ impl Rng {
 }
 
 fn quantized(v: &[f32]) -> Vec<BlockQ8_0> {
-    let mut out = vec![BlockQ8_0 { d: 0, qs: [0; QK8_0] }; v.len() / QK8_0];
+    let mut out = vec![
+        BlockQ8_0 {
+            d: 0,
+            qs: [0; QK8_0]
+        };
+        v.len() / QK8_0
+    ];
     q8::quantize(v, &mut out);
     out
 }
@@ -208,7 +214,10 @@ fn rope_llama3_scaling_behaviour() {
     // Lowest-frequency pair is divided by the full factor.
     let last = head_dim / 2 - 1;
     let wavelen = 2.0 * std::f32::consts::PI / plain[last];
-    assert!(wavelen > 8192.0, "sanity: lowest freq is in the scaled regime");
+    assert!(
+        wavelen > 8192.0,
+        "sanity: lowest freq is in the scaled regime"
+    );
     assert!((scaled[last] - plain[last] / 32.0).abs() < plain[last] * 1e-5);
     // Everything is monotonically decreasing.
     for w in scaled.windows(2) {

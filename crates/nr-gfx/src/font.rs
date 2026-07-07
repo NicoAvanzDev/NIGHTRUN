@@ -180,7 +180,11 @@ fn decode_utf8(bytes: &[u8]) -> Option<u32> {
     Some(match bytes.len() {
         1 => b0,
         2 => ((b0 & 0x1F) << 6) | (*bytes.get(1)? as u32 & 0x3F),
-        3 => ((b0 & 0x0F) << 12) | ((*bytes.get(1)? as u32 & 0x3F) << 6) | (*bytes.get(2)? as u32 & 0x3F),
+        3 => {
+            ((b0 & 0x0F) << 12)
+                | ((*bytes.get(1)? as u32 & 0x3F) << 6)
+                | (*bytes.get(2)? as u32 & 0x3F)
+        }
         4 => {
             ((b0 & 0x07) << 18)
                 | ((*bytes.get(1)? as u32 & 0x3F) << 12)

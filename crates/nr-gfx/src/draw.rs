@@ -36,12 +36,23 @@ pub fn text_width(font: &PsfFont, s: &str, scale: usize, tracking: i32) -> i32 {
 }
 
 /// Draw text; `tracking` is extra pixels between glyphs.
-pub fn text(surf: &mut Surface, font: &PsfFont, x: i32, y: i32, s: &str, colr: u32, scale: usize, tracking: i32) {
+#[allow(clippy::too_many_arguments)] // flat draw API is deliberate
+pub fn text(
+    surf: &mut Surface,
+    font: &PsfFont,
+    x: i32,
+    y: i32,
+    s: &str,
+    colr: u32,
+    scale: usize,
+    tracking: i32,
+) {
     text_fx(surf, font, x, y, s, scale, tracking, 0, |_, _| colr, 255);
 }
 
 /// Full-control text: shear (italic slant, pixels shifted right at the top
 /// row, tapering to 0 at the bottom), per-row color, global alpha.
+#[allow(clippy::too_many_arguments)] // flat draw API is deliberate
 pub fn text_fx(
     surf: &mut Surface,
     font: &PsfFont,
@@ -92,7 +103,7 @@ pub fn substitute(ch: char) -> Option<char> {
 }
 
 /// Soft neon glow behind text: several blended, offset copies.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // flat draw API is deliberate
 pub fn text_glow(
     surf: &mut Surface,
     font: &PsfFont,
@@ -107,8 +118,28 @@ pub fn text_glow(
 ) {
     for r in 1..=radius {
         let a = (46 / r as u32).max(10);
-        for (dx, dy) in [(r, 0), (-r, 0), (0, r), (0, -r), (r, r), (-r, r), (r, -r), (-r, -r)] {
-            text_fx(surf, font, x + dx, y + dy, s, scale, tracking, shear, |_, _| colr, a);
+        for (dx, dy) in [
+            (r, 0),
+            (-r, 0),
+            (0, r),
+            (0, -r),
+            (r, r),
+            (-r, r),
+            (r, -r),
+            (-r, -r),
+        ] {
+            text_fx(
+                surf,
+                font,
+                x + dx,
+                y + dy,
+                s,
+                scale,
+                tracking,
+                shear,
+                |_, _| colr,
+                a,
+            );
         }
     }
 }

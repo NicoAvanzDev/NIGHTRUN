@@ -31,7 +31,9 @@ impl Clock {
         let t0 = rdtsc();
         stall_us(20_000);
         let t1 = rdtsc();
-        Clock { ticks_per_ms: ((t1 - t0) / 20).max(1) }
+        Clock {
+            ticks_per_ms: ((t1 - t0) / 20).max(1),
+        }
     }
 
     #[inline]

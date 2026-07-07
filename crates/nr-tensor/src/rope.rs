@@ -3,10 +3,10 @@
 
 #[derive(Clone, Copy, Debug)]
 pub struct Llama3Scaling {
-    pub factor: f32,               // 32.0 for Llama 3.2
-    pub low_freq_factor: f32,      // 1.0
-    pub high_freq_factor: f32,     // 4.0
-    pub original_context: f32,     // 8192.0
+    pub factor: f32,           // 32.0 for Llama 3.2
+    pub low_freq_factor: f32,  // 1.0
+    pub high_freq_factor: f32, // 4.0
+    pub original_context: f32, // 8192.0
 }
 
 /// Per-pair base frequencies for one head: freqs[i] applies to elements
@@ -45,6 +45,7 @@ pub enum RopeStyle {
 
 /// Rotate `x` (one or more heads laid out contiguously) in place for
 /// position `pos`. `freqs` holds head_dim/2 base frequencies.
+#[allow(clippy::needless_range_loop)] // i indexes freqs and paired lanes
 pub fn apply(x: &mut [f32], head_dim: usize, freqs: &[f32], pos: usize, style: RopeStyle) {
     let half = head_dim / 2;
     for head in x.chunks_exact_mut(head_dim) {

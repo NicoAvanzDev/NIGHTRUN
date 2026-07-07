@@ -35,7 +35,11 @@ mod imp {
 
     pub fn features() -> Features {
         let bits = cached_bits();
-        Features { avx2: bits & F_A != 0, fma: bits & F_B != 0, f16c: bits & F_C != 0 }
+        Features {
+            avx2: bits & F_A != 0,
+            fma: bits & F_B != 0,
+            f16c: bits & F_C != 0,
+        }
     }
 
     /// True when the AVX2+FMA kernel paths can be used.
@@ -51,7 +55,11 @@ mod imp {
     }
 
     pub fn simd_label() -> &'static str {
-        if fast_path() { "AVX2+FMA kernels" } else { "scalar kernels (no AVX2)" }
+        if fast_path() {
+            "AVX2+FMA kernels"
+        } else {
+            "scalar kernels (no AVX2)"
+        }
     }
 
     pub(super) fn probe() -> u8 {
@@ -102,7 +110,10 @@ mod imp {
 
     pub fn features() -> Features {
         let bits = cached_bits();
-        Features { dotprod: bits & F_A != 0, fp16: bits & F_B != 0 }
+        Features {
+            dotprod: bits & F_A != 0,
+            fp16: bits & F_B != 0,
+        }
     }
 
     /// NEON is architecturally baseline on aarch64 (and the UEFI target
@@ -117,20 +128,28 @@ mod imp {
     }
 
     pub fn simd_label() -> &'static str {
-        if features().dotprod { "NEON+DOTPROD kernels" } else { "NEON kernels" }
+        if features().dotprod {
+            "NEON+DOTPROD kernels"
+        } else {
+            "NEON kernels"
+        }
     }
 
     pub(super) fn probe() -> u8 {
         let mut bits = PROBED;
         // ID_AA64ISAR0_EL1.DP (bits 47:44) => FEAT_DotProd.
         let isar0: u64;
-        unsafe { core::arch::asm!("mrs {}, ID_AA64ISAR0_EL1", out(reg) isar0, options(nostack, nomem)) };
+        unsafe {
+            core::arch::asm!("mrs {}, ID_AA64ISAR0_EL1", out(reg) isar0, options(nostack, nomem))
+        };
         if (isar0 >> 44) & 0xf >= 1 {
             bits |= F_A;
         }
         // ID_AA64PFR0_EL1.FP (bits 19:16) == 1 => FEAT_FP16 arithmetic.
         let pfr0: u64;
-        unsafe { core::arch::asm!("mrs {}, ID_AA64PFR0_EL1", out(reg) pfr0, options(nostack, nomem)) };
+        unsafe {
+            core::arch::asm!("mrs {}, ID_AA64PFR0_EL1", out(reg) pfr0, options(nostack, nomem))
+        };
         if (pfr0 >> 16) & 0xf == 1 {
             bits |= F_B;
         }

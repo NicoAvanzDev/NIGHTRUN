@@ -20,7 +20,11 @@ fn crc32_matches_classic_algorithm() {
         for &b in data {
             c ^= b as u32;
             for _ in 0..8 {
-                c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
+                c = if c & 1 != 0 {
+                    0xEDB8_8320 ^ (c >> 1)
+                } else {
+                    c >> 1
+                };
             }
         }
         c ^ 0xffff_ffff
@@ -36,12 +40,18 @@ fn crc32_matches_classic_algorithm() {
         .collect();
     // Odd lengths exercise the remainder path.
     for len in [0, 1, 7, 8, 9, 63, 100_003] {
-        assert_eq!(nr_model::crc32::checksum(&data[..len]), classic(&data[..len]), "len {len}");
+        assert_eq!(
+            nr_model::crc32::checksum(&data[..len]),
+            classic(&data[..len]),
+            "len {len}"
+        );
     }
 }
 
 fn feed_all(bytes: &[u8], chunk: usize) -> Result<(), VerifyError> {
-    let mut v = StreamingVerifier::new(&bytes[..nr_model::format::HEADER_SIZE.max(chunk).min(bytes.len())])?;
+    let mut v = StreamingVerifier::new(
+        &bytes[..nr_model::format::HEADER_SIZE.max(chunk).min(bytes.len())],
+    )?;
     let mut off = 0;
     while off < bytes.len() {
         let end = (off + chunk).min(bytes.len());
