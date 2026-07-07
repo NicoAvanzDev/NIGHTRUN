@@ -35,14 +35,17 @@ nr_protected_disks() {
     {
         for mp in / /boot /boot/efi /home; do
             src="$(findmnt -no SOURCE --target "$mp" 2>/dev/null)" || continue
-            [[ "$src" == /dev/* ]] && lsblk -no PKNAME -- "$src" 2>/dev/null
-            # A disk mounted directly (no partition) has no PKNAME.
-            [[ "$src" == /dev/* ]] && lsblk -dno NAME -- "$src" 2>/dev/null
+            # Full ancestor walk (-s): on stacked storage (LUKS, LVM,
+            # LUKS-on-LVM) a single PKNAME hop stops at the intermediate
+            # dm device and never reaches the physical disk. -s prints
+            # the device and every ancestor up to the whole disk; extra
+            # non-disk names in the set are harmless (candidates are
+            # whole disks only).
+            [[ "$src" == /dev/* ]] && lsblk -snlo NAME -- "$src" 2>/dev/null
         done
-        # Active swap devices.
+        # Active swap devices (same stacked-storage treatment).
         awk '$1 ~ /^\/dev\// {print $1}' /proc/swaps 2>/dev/null | while IFS= read -r src; do
-            lsblk -no PKNAME -- "$src" 2>/dev/null
-            lsblk -dno NAME -- "$src" 2>/dev/null
+            lsblk -snlo NAME -- "$src" 2>/dev/null
         done
     } | sed 's|^|/dev/|; s|^/dev//dev/|/dev/|' | sort -u
 }
