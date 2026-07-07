@@ -10,7 +10,7 @@ tested), and model checksums are computed while chunks stream from disk
 | | prefill before | prefill after | llama.cpp | boot-to-chat before | after |
 |---|---|---|---|---|---|
 | Llama 1B Q8_0 | 21 tok/s | **52-56 tok/s** | 60-65 | 8.4 s | **5.6 s** |
-| Qwen3 4B Q4_K_M | 11 tok/s | **~23 tok/s** | 31-32 | 20.7 s | ~13 s (est) |
+| Qwen3 4B Q4_K_M | 11 tok/s | **~23 tok/s** | 31-32 | 20.7 s | **11.5 s** |
 | Granite 3B Q4_K_M | 14 tok/s | **23-27 tok/s** | — | 15.0 s | **9.5 s** |
 
 (host prefill sweep: batch 1/8/16/32/64 -> llama 21/…/56, qwen
