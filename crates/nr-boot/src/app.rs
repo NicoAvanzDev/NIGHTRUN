@@ -119,8 +119,14 @@ fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx
     ui.show(0, 300, "TSC clock calibrated");
     let simd = nr_tensor::cpu::simd_label();
     ui.show(0, 600, simd);
-    let workers = crate::smp::start_workers();
-    ui.show(0, 1000, &alloc::format!("{} cores online ({} inference workers)", workers + 1, workers));
+    let (workers, smp_note) = crate::smp::start_workers();
+    if workers == 0 {
+        // Visible diagnosis on hardware without serial; linger briefly.
+        ui.show(0, 1000, &alloc::format!("single core ({smp_note})"));
+        stall_us(1_500_000);
+    } else {
+        ui.show(0, 1000, &alloc::format!("{} cores online ({} inference workers)", workers + 1, workers));
+    }
     stall_us(150_000);
 
     // Stage 1: memory scan.
