@@ -1,5 +1,7 @@
-//! aarch64 NEON kernels (baseline ARMv8.0 intrinsics — no optional
-//! features required; FEAT_DotProd can further speed dot_q8 later).
+//! aarch64 NEON kernels: baseline ARMv8.0 with a runtime-dispatched
+//! FEAT_DotProd (sdot) fast path — one instruction per 16 int8 products
+//! instead of four. Integer sums are exact either way, so both paths are
+//! interchangeable bit-for-bit.
 //!
 //! Design rule: NEON computes the *integer* block dots (which are exact),
 //! and every f32 scale/accumulate step then replicates the scalar
@@ -10,24 +12,55 @@
 
 use core::arch::aarch64::*;
 
-/// Exact dot of 32 i8 pairs: i16 widening multiplies, pairwise-add into
-/// i32 lanes (no overflow: |p| <= 127*127, added in pairs).
+/// `acc.4s += sdot(a.16b, b.16b)` — FEAT_DotProd, one instruction for 16
+/// i8 products. Emitted as a raw encoding with pinned registers: the
+/// intrinsic is unstable, and using the mnemonic would require enabling
+/// `dotprod` at build time, which must not leak into the baseline
+/// fallback path. Callers gate on the runtime FEAT_DotProd probe.
+#[inline(always)]
+unsafe fn sdot_acc(acc: int32x4_t, a: int8x16_t, b: int8x16_t) -> int32x4_t {
+    let mut r = acc;
+    core::arch::asm!(
+        ".inst 0x4e829420", // sdot v0.4s, v1.16b, v2.16b
+        inout("v0") r, in("v1") a, in("v2") b,
+        options(pure, nomem, nostack)
+    );
+    r
+}
+
+/// Exact dot of 32 i8 pairs. `SDOT` selects FEAT_DotProd (one instruction
+/// per 16 bytes) vs the baseline widening-multiply path; integer sums are
+/// exact either way, so results are identical.
 #[inline]
-unsafe fn dot_i8x32(w0: int8x16_t, w1: int8x16_t, x0: int8x16_t, x1: int8x16_t) -> i32 {
+unsafe fn dot_i8x32<const SDOT: bool>(
+    w0: int8x16_t,
+    w1: int8x16_t,
+    x0: int8x16_t,
+    x1: int8x16_t,
+) -> i32 {
     let mut acc = vdupq_n_s32(0);
-    acc = vpadalq_s16(acc, vmull_s8(vget_low_s8(w0), vget_low_s8(x0)));
-    acc = vpadalq_s16(acc, vmull_s8(vget_high_s8(w0), vget_high_s8(x0)));
-    acc = vpadalq_s16(acc, vmull_s8(vget_low_s8(w1), vget_low_s8(x1)));
-    acc = vpadalq_s16(acc, vmull_s8(vget_high_s8(w1), vget_high_s8(x1)));
+    if SDOT {
+        acc = sdot_acc(acc, w0, x0);
+        acc = sdot_acc(acc, w1, x1);
+    } else {
+        acc = vpadalq_s16(acc, vmull_s8(vget_low_s8(w0), vget_low_s8(x0)));
+        acc = vpadalq_s16(acc, vmull_s8(vget_high_s8(w0), vget_high_s8(x0)));
+        acc = vpadalq_s16(acc, vmull_s8(vget_low_s8(w1), vget_low_s8(x1)));
+        acc = vpadalq_s16(acc, vmull_s8(vget_high_s8(w1), vget_high_s8(x1)));
+    }
     vaddvq_s32(acc)
 }
 
-/// Exact dot of 16 i8 pairs.
+/// Exact dot of 16 i8 pairs (see [`dot_i8x32`]).
 #[inline]
-unsafe fn dot_i8x16(w: int8x16_t, x: int8x16_t) -> i32 {
+unsafe fn dot_i8x16<const SDOT: bool>(w: int8x16_t, x: int8x16_t) -> i32 {
     let mut acc = vdupq_n_s32(0);
-    acc = vpadalq_s16(acc, vmull_s8(vget_low_s8(w), vget_low_s8(x)));
-    acc = vpadalq_s16(acc, vmull_s8(vget_high_s8(w), vget_high_s8(x)));
+    if SDOT {
+        acc = sdot_acc(acc, w, x);
+    } else {
+        acc = vpadalq_s16(acc, vmull_s8(vget_low_s8(w), vget_low_s8(x)));
+        acc = vpadalq_s16(acc, vmull_s8(vget_high_s8(w), vget_high_s8(x)));
+    }
     vaddvq_s32(acc)
 }
 
@@ -36,16 +69,26 @@ pub mod kernels {
     use crate::q8::BlockQ8_0;
 
     /// Per-block integer dot in NEON + the scalar kernel's exact f32
-    /// accumulation: bit-identical to `dot_q8_scalar`.
+    /// accumulation: bit-identical to `dot_q8_scalar`. Dispatches once on
+    /// FEAT_DotProd (sdot) vs the baseline multiply path.
     ///
     /// # Safety
     /// NEON is baseline on aarch64; no extra requirements.
     pub unsafe fn dot_q8(w: &[BlockQ8_0], x: &[BlockQ8_0]) -> f32 {
+        if crate::cpu::features().dotprod {
+            dot_q8_impl::<true>(w, x)
+        } else {
+            dot_q8_impl::<false>(w, x)
+        }
+    }
+
+    #[doc(hidden)]
+    pub unsafe fn dot_q8_impl<const SDOT: bool>(w: &[BlockQ8_0], x: &[BlockQ8_0]) -> f32 {
         let mut sum = 0f32;
         for (bw, bx) in w.iter().zip(x.iter()) {
             let wp = bw.qs.as_ptr() as *const i8;
             let xp = bx.qs.as_ptr() as *const i8;
-            let acc = dot_i8x32(
+            let acc = dot_i8x32::<SDOT>(
                 vld1q_s8(wp),
                 vld1q_s8(wp.add(16)),
                 vld1q_s8(xp),
@@ -62,6 +105,18 @@ pub mod kernels {
     /// # Safety
     /// NEON is baseline on aarch64; no extra requirements.
     pub unsafe fn dot_q8_x4(w: &[BlockQ8_0], xs: [&[BlockQ8_0]; 4]) -> [f32; 4] {
+        if crate::cpu::features().dotprod {
+            dot_q8_x4_impl::<true>(w, xs)
+        } else {
+            dot_q8_x4_impl::<false>(w, xs)
+        }
+    }
+
+    #[doc(hidden)]
+    pub unsafe fn dot_q8_x4_impl<const SDOT: bool>(
+        w: &[BlockQ8_0],
+        xs: [&[BlockQ8_0]; 4],
+    ) -> [f32; 4] {
         let mut sum = [0f32; 4];
         for (bi, bw) in w.iter().enumerate() {
             let wp = bw.qs.as_ptr() as *const i8;
@@ -71,7 +126,7 @@ pub mod kernels {
             for lane in 0..4 {
                 let bx = &xs[lane][bi];
                 let xp = bx.qs.as_ptr() as *const i8;
-                let acc = dot_i8x32(w0, w1, vld1q_s8(xp), vld1q_s8(xp.add(16)));
+                let acc = dot_i8x32::<SDOT>(w0, w1, vld1q_s8(xp), vld1q_s8(xp.add(16)));
                 sum[lane] += acc as f32 * dw * bx.scale();
             }
         }
@@ -172,6 +227,15 @@ pub mod kquant {
     /// # Safety
     /// NEON is baseline on aarch64; no extra requirements.
     pub unsafe fn dot_q4k(w: &[BlockQ4K], x: &[BlockQ8K]) -> f32 {
+        if crate::cpu::features().dotprod {
+            dot_q4k_impl::<true>(w, x)
+        } else {
+            dot_q4k_impl::<false>(w, x)
+        }
+    }
+
+    #[doc(hidden)]
+    pub unsafe fn dot_q4k_impl<const SDOT: bool>(w: &[BlockQ4K], x: &[BlockQ8K]) -> f32 {
         let mut sumf = 0f32;
         for (bw, bx) in w.iter().zip(x.iter()) {
             let d_all = f16_to_f32(bw.d) * bx.d;
@@ -183,7 +247,7 @@ pub mod kquant {
                 let (sc, m) = q4k_scale_min(&scales, j);
                 let (w0, w1) = q4k_sub(bw.qs.as_ptr(), j);
                 let xp = bx.qs.as_ptr().add(j * 32);
-                let sub = dot_i8x32(w0, w1, vld1q_s8(xp), vld1q_s8(xp.add(16)));
+                let sub = dot_i8x32::<SDOT>(w0, w1, vld1q_s8(xp), vld1q_s8(xp.add(16)));
                 sum_q += sc as f32 * sub as f32;
                 sum_m += m as i32 * (bx.bsums[2 * j] as i32 + bx.bsums[2 * j + 1] as i32);
             }
@@ -198,6 +262,18 @@ pub mod kquant {
     /// # Safety
     /// NEON is baseline on aarch64; no extra requirements.
     pub unsafe fn dot_q4k_x4(w: &[BlockQ4K], xs: [&[BlockQ8K]; 4]) -> [f32; 4] {
+        if crate::cpu::features().dotprod {
+            dot_q4k_x4_impl::<true>(w, xs)
+        } else {
+            dot_q4k_x4_impl::<false>(w, xs)
+        }
+    }
+
+    #[doc(hidden)]
+    pub unsafe fn dot_q4k_x4_impl<const SDOT: bool>(
+        w: &[BlockQ4K],
+        xs: [&[BlockQ8K]; 4],
+    ) -> [f32; 4] {
         let mut sumf = [0f32; 4];
         for (bi, bw) in w.iter().enumerate() {
             let d_w = f16_to_f32(bw.d);
@@ -211,7 +287,7 @@ pub mod kquant {
                 for lane in 0..4 {
                     let bx = &xs[lane][bi];
                     let xp = bx.qs.as_ptr().add(j * 32);
-                    let sub = dot_i8x32(w0, w1, vld1q_s8(xp), vld1q_s8(xp.add(16)));
+                    let sub = dot_i8x32::<SDOT>(w0, w1, vld1q_s8(xp), vld1q_s8(xp.add(16)));
                     sum_q[lane] += sc as f32 * sub as f32;
                     sum_m[lane] +=
                         m as i32 * (bx.bsums[2 * j] as i32 + bx.bsums[2 * j + 1] as i32);
@@ -273,6 +349,15 @@ pub mod kquant {
     /// # Safety
     /// NEON is baseline on aarch64; no extra requirements.
     pub unsafe fn dot_q6k(w: &[BlockQ6K], x: &[BlockQ8K]) -> f32 {
+        if crate::cpu::features().dotprod {
+            dot_q6k_impl::<true>(w, x)
+        } else {
+            dot_q6k_impl::<false>(w, x)
+        }
+    }
+
+    #[doc(hidden)]
+    pub unsafe fn dot_q6k_impl<const SDOT: bool>(w: &[BlockQ6K], x: &[BlockQ8K]) -> f32 {
         let mut sumf = 0f32;
         for (bw, bx) in w.iter().zip(x.iter()) {
             let d_all = f16_to_f32(bw.d) * bx.d;
@@ -305,8 +390,8 @@ pub mod kquant {
                 for (n, (qa, qb)) in planes.into_iter().enumerate() {
                     let xa = vld1q_s8(q8.add(n * 32) as *const i8);
                     let xb = vld1q_s8(q8.add(n * 32 + 16) as *const i8);
-                    group_sums[2 * n] = dot_i8x16(qa, xa);
-                    group_sums[2 * n + 1] = dot_i8x16(qb, xb);
+                    group_sums[2 * n] = dot_i8x16::<SDOT>(qa, xa);
+                    group_sums[2 * n + 1] = dot_i8x16::<SDOT>(qb, xb);
                 }
                 for g in 0..8 {
                     sum += sc[g] as f32 * group_sums[g] as f32;
@@ -323,6 +408,18 @@ pub mod kquant {
     /// # Safety
     /// NEON is baseline on aarch64; no extra requirements.
     pub unsafe fn dot_q6k_x4(w: &[BlockQ6K], xs: [&[BlockQ8K]; 4]) -> [f32; 4] {
+        if crate::cpu::features().dotprod {
+            dot_q6k_x4_impl::<true>(w, xs)
+        } else {
+            dot_q6k_x4_impl::<false>(w, xs)
+        }
+    }
+
+    #[doc(hidden)]
+    pub unsafe fn dot_q6k_x4_impl<const SDOT: bool>(
+        w: &[BlockQ6K],
+        xs: [&[BlockQ8K]; 4],
+    ) -> [f32; 4] {
         let mut sumf = [0f32; 4];
         for (bi, bw) in w.iter().enumerate() {
             let d_w = f16_to_f32(bw.d);
@@ -352,8 +449,8 @@ pub mod kquant {
                     for (n, (qa, qb)) in planes.iter().enumerate() {
                         let xa = vld1q_s8(q8.add(n * 32) as *const i8);
                         let xb = vld1q_s8(q8.add(n * 32 + 16) as *const i8);
-                        group_sums[2 * n] = dot_i8x16(*qa, xa);
-                        group_sums[2 * n + 1] = dot_i8x16(*qb, xb);
+                        group_sums[2 * n] = dot_i8x16::<SDOT>(*qa, xa);
+                        group_sums[2 * n + 1] = dot_i8x16::<SDOT>(*qb, xb);
                     }
                     for g in 0..8 {
                         sum[lane] += sc[g] as f32 * group_sums[g] as f32;

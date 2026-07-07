@@ -109,6 +109,35 @@ fn neon_q6k_bit_equals_scalar() {
     }
 }
 
+/// Both integer-dot paths (sdot and the baseline multiply) must agree
+/// exactly, regardless of which one the CPU probe would pick.
+#[test]
+fn neon_sdot_and_baseline_paths_identical() {
+    let mut rng = Rng(61);
+    let blocks = 6;
+    let w8 = q8(&rng.adversarial(blocks * QK8_0));
+    let x8 = q8(&rng.vec(blocks * QK8_0));
+    unsafe {
+        assert_eq!(
+            neon::kernels::dot_q8_impl::<true>(&w8, &x8),
+            neon::kernels::dot_q8_impl::<false>(&w8, &x8)
+        );
+    }
+    let w4: Vec<_> = rng.adversarial(blocks * QK_K).chunks_exact(QK_K).map(quantize_q4k_ref).collect();
+    let w6: Vec<_> = rng.adversarial(blocks * QK_K).chunks_exact(QK_K).map(quantize_q6k_ref).collect();
+    let xk = q8k(&rng.vec(blocks * QK_K));
+    unsafe {
+        assert_eq!(
+            neon::kquant::dot_q4k_impl::<true>(&w4, &xk),
+            neon::kquant::dot_q4k_impl::<false>(&w4, &xk)
+        );
+        assert_eq!(
+            neon::kquant::dot_q6k_impl::<true>(&w6, &xk),
+            neon::kquant::dot_q6k_impl::<false>(&w6, &xk)
+        );
+    }
+}
+
 /// Saturated metadata: max 6-bit scales/mins, extreme quants.
 #[test]
 fn neon_kquant_saturated_blocks() {

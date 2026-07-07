@@ -117,7 +117,7 @@ mod imp {
     }
 
     pub fn simd_label() -> &'static str {
-        "NEON kernels"
+        if features().dotprod { "NEON+DOTPROD kernels" } else { "NEON kernels" }
     }
 
     pub(super) fn probe() -> u8 {
