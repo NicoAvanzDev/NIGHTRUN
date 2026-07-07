@@ -69,14 +69,15 @@ pub fn draw(
     fonts: &Fonts,
     turns: &[Turn],
     input: &str,
+    caret: usize,
     cursor_on: bool,
     stats: &Stats,
     scroll: usize,
 ) -> usize {
     surf.clear(theme::BG_DEEP);
-    let content_col = "user:".len().max(stats.assistant.len() + 1) + 1;
+    let content_col = "USER:".len().max(stats.assistant.len() + 1) + 1;
     status_bar(surf, fonts, stats);
-    input_bar(surf, fonts, input, cursor_on, stats.generating);
+    input_bar(surf, fonts, input, caret, cursor_on, stats.generating);
     let scroll = scrollback(
         surf, fonts, turns, stats.generating, cursor_on, scroll, stats.assistant, content_col,
     );
@@ -148,7 +149,14 @@ fn status_bar(surf: &mut Surface, fonts: &Fonts, stats: &Stats) {
     draw::text(surf, f, rx, ty, &right, rate_col, 1, 0);
 }
 
-fn input_bar(surf: &mut Surface, fonts: &Fonts, input: &str, cursor_on: bool, generating: bool) {
+fn input_bar(
+    surf: &mut Surface,
+    fonts: &Fonts,
+    input: &str,
+    caret: usize,
+    cursor_on: bool,
+    generating: bool,
+) {
     let w = surf.width as i32;
     let h = surf.height as i32;
     let y0 = h - INPUT_H;
@@ -163,20 +171,26 @@ fn input_bar(surf: &mut Surface, fonts: &Fonts, input: &str, cursor_on: bool, ge
     }
     // Input follows the label after a single standard space (unlike the
     // transcript, which aligns to the shared content column).
-    draw::text(surf, f, MARGIN, ty, "user:", theme::NEON_CYAN, 1, 0);
-    let tx = MARGIN + ("user:".len() as i32 + 1) * f.width as i32;
+    draw::text(surf, f, MARGIN, ty, "USER:", theme::NEON_CYAN, 1, 0);
+    let tx = MARGIN + ("USER:".len() as i32 + 1) * f.width as i32;
 
-    // Show the tail of the input if it overflows.
+    // Window the text so the caret is always visible; the block cursor
+    // sits ON the caret cell (classic terminal), overlaying the char there.
+    let chars: Vec<char> = input.chars().collect();
+    let caret = caret.min(chars.len());
     let max_cols = ((w - tx - MARGIN - f.width as i32) / f.width as i32).max(1) as usize;
-    let shown: String = if input.chars().count() > max_cols {
-        input.chars().skip(input.chars().count() - max_cols).collect()
-    } else {
-        input.into()
-    };
+    let start = if caret >= max_cols { caret + 1 - max_cols } else { 0 };
+    let end = (start + max_cols).min(chars.len());
+    let shown: String = chars[start..end].iter().collect();
     draw::text(surf, f, tx, ty, &shown, theme::TEXT_PRIMARY, 1, 0);
     if cursor_on {
-        let cx = tx + draw::text_width(f, &shown, 1, 0) + 2;
+        let cx = tx + (caret - start) as i32 * f.width as i32;
         surf.fill_rect(cx, ty + 2, f.width as i32 - 2, f.height as i32 - 4, theme::NEON_CYAN);
+        if caret < chars.len() {
+            // Character under the cursor, inverted.
+            let under: String = chars[caret..caret + 1].iter().collect();
+            draw::text(surf, f, cx, ty, &under, theme::BG_DEEP, 1, 0);
+        }
     }
 }
 
@@ -212,9 +226,9 @@ fn scrollback(
             lines.push((0, 0, String::new(), String::new(), false)); // separator
         }
         let label = match turn.role {
-            Role::User => String::from("user:"),
+            Role::User => String::from("USER:"),
             Role::Llama => {
-                let mut p = String::from(assistant);
+                let mut p = assistant.to_ascii_uppercase();
                 p.push(':');
                 p
             }
@@ -258,22 +272,23 @@ fn scrollback(
         y += line_h;
     }
 
-    // While the model streams, the blinking block cursor lives at the end
-    // of the output (the input field shows the generating notice instead);
-    // it moves back to the input field when generation completes.
-    let streaming = generating && turns.last().is_some_and(|t| t.role == Role::Llama);
-    if streaming && cursor_on && scroll == 0 && end > start {
-        let (_, _, _, body, at_margin) = &lines[end - 1];
-        let base_x = if *at_margin { MARGIN } else { body_x };
-        let mut cx = base_x + draw::text_width(f, body, 1, 0) + 2;
-        let mut cy = y - line_h;
-        if cx + f.width as i32 > surf.width as i32 - MARGIN {
-            // Last line is full: the next character starts a new row.
-            cx = base_x;
-            cy += line_h;
-        }
+    // While waiting for the FIRST token, a blinking block sits right after
+    // the model label ("GRANITE █" — thinking). It disappears the moment
+    // text starts streaming; the streamed output carries no cursor. The
+    // input field shows the generating notice for the whole duration, and
+    // the cursor returns there when the reply completes.
+    let thinking = generating
+        && turns.last().is_some_and(|t| t.role == Role::Llama && t.text.is_empty());
+    if thinking && cursor_on && scroll == 0 && end > start {
+        let cy = y - line_h;
         if cy + line_h <= bottom {
-            surf.fill_rect(cx, cy + 2, f.width as i32 - 2, f.height as i32 - 4, theme::NEON_PINK);
+            surf.fill_rect(
+                body_x,
+                cy + 2,
+                f.width as i32 - 2,
+                f.height as i32 - 4,
+                theme::NEON_PINK,
+            );
         }
     }
 

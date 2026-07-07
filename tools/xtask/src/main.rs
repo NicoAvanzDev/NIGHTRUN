@@ -497,6 +497,9 @@ impl Qmp {
                     "pgup" => "pgup",
                     "pgdn" => "pgdn",
                     "esc" => "esc",
+                    "left" => "left",
+                    "right" => "right",
+                    "del" => "delete",
                     other => {
                         eprintln!("unknown key token <{other}>");
                         ""

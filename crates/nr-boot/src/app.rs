@@ -283,6 +283,7 @@ fn chat_loop(p: &mut Platform, surf: &mut nr_gfx::Surface) {
     let mut turns: Vec<Turn> = Vec::new();
     turns.push(intro_turn(&p.model_name));
     let mut inputline = String::new();
+    let mut caret: usize = 0; // char index into inputline
     let mut frame = 0u32;
     let mut last_rate = 0u32;
     let mut conversation_started = false;
@@ -294,12 +295,29 @@ fn chat_loop(p: &mut Platform, surf: &mut nr_gfx::Surface) {
         while let Some(ev) = input::poll() {
             dirty = true;
             match ev {
-                InputEvent::Char(c) => inputline.push(c),
-                InputEvent::Backspace => {
-                    inputline.pop();
+                InputEvent::Char(c) => {
+                    let b = byte_at(&inputline, caret);
+                    inputline.insert(b, c);
+                    caret += 1;
                 }
+                InputEvent::Backspace => {
+                    if caret > 0 {
+                        caret -= 1;
+                        let b = byte_at(&inputline, caret);
+                        inputline.remove(b);
+                    }
+                }
+                InputEvent::Delete => {
+                    if caret < inputline.chars().count() {
+                        let b = byte_at(&inputline, caret);
+                        inputline.remove(b);
+                    }
+                }
+                InputEvent::Left => caret = caret.saturating_sub(1),
+                InputEvent::Right => caret = (caret + 1).min(inputline.chars().count()),
                 InputEvent::Enter => {
                     let prompt = core::mem::take(&mut inputline);
+                    caret = 0;
                     let trimmed = prompt.trim();
                     scroll = 0;
                     match trimmed {
@@ -325,7 +343,7 @@ fn chat_loop(p: &mut Platform, surf: &mut nr_gfx::Surface) {
                                 role: Role::System,
                                 text: String::from("Shutting down. Goodbye!"),
                             });
-                            draw_chat(p, surf, &turns, "", frame, 0, false, 0);
+                            draw_chat(p, surf, &turns, "", 0, frame, 0, false, 0);
                             serial_println!("[chat] /bye - shutting down");
                             stall_us(800_000);
                             // Real UEFI power-off via runtime services.
@@ -359,7 +377,7 @@ fn chat_loop(p: &mut Platform, surf: &mut nr_gfx::Surface) {
         }
 
         if dirty || frame % 8 == 0 {
-            scroll = draw_chat(p, surf, &turns, &inputline, frame, last_rate, false, scroll);
+            scroll = draw_chat(p, surf, &turns, &inputline, caret, frame, last_rate, false, scroll);
         }
         frame = frame.wrapping_add(1);
         stall_us(16_000);
@@ -397,11 +415,13 @@ fn generate(
 
     turns.push(Turn { role: Role::Llama, text: String::new() });
 
-    // Batched prefill; redraw between chunks so the UI shows life.
+    // Batched prefill. Chunks of 16 (not MAX_BATCH): each chunk boundary
+    // is a redraw, which is what makes the thinking cursor blink while
+    // the model has produced no text yet; pp cost vs 64 is negligible.
     let t0 = p.clock.now();
-    for chunk in ids.chunks(nr_model::infer::MAX_BATCH) {
+    for chunk in ids.chunks(16) {
         p.infer.prefill_chunk(chunk);
-        draw_chat(p, surf, turns, "", frame, 0, true, 0);
+        draw_chat(p, surf, turns, "", 0, frame, 0, true, 0);
         frame = frame.wrapping_add(1);
         if matches!(input::poll(), Some(InputEvent::Escape)) {
             serial_println!("[gen] prefill interrupted");
@@ -435,7 +455,7 @@ fn generate(
 
         produced += 1;
         rate = p.clock.rate_milli(produced, p.clock.now() - t0);
-        draw_chat(p, surf, turns, "", frame, rate, true, 0);
+        draw_chat(p, surf, turns, "", 0, frame, rate, true, 0);
         frame = frame.wrapping_add(1);
 
         if matches!(input::poll(), Some(InputEvent::Escape)) {
@@ -482,12 +502,18 @@ fn flush_utf8(pending: &mut Vec<u8>, out: &mut String) {
     }
 }
 
+/// Char index -> byte offset for caret edits (prompt text is UTF-8).
+fn byte_at(s: &str, char_idx: usize) -> usize {
+    s.char_indices().nth(char_idx).map(|(b, _)| b).unwrap_or(s.len())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw_chat(
     p: &Platform,
     surf: &mut nr_gfx::Surface,
     turns: &[Turn],
     input: &str,
+    caret: usize,
     frame: u32,
     rate_milli: u32,
     generating: bool,
@@ -506,10 +532,10 @@ fn draw_chat(
         cores: p.cores,
         generating,
     };
-    // The blink phase is shared; chat::draw places the block cursor in the
-    // output area while generating, in the input field otherwise.
-    let cursor_on = (frame / 16) % 2 == 0;
-    let scroll = nr_ui::chat::draw(surf, &p.fonts, turns, input, cursor_on, &stats, scroll);
+    // Blink cadence: idle frames tick at ~60 Hz (divide down); generation
+    // frames tick per prefill chunk / decoded token (toggle each redraw).
+    let cursor_on = if generating { frame % 2 == 0 } else { (frame / 16) % 2 == 0 };
+    let scroll = nr_ui::chat::draw(surf, &p.fonts, turns, input, caret, cursor_on, &stats, scroll);
     p.display.present(surf);
     scroll
 }
