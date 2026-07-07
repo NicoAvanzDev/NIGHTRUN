@@ -38,8 +38,8 @@ pub fn load(progress: &mut dyn FnMut(usize, usize)) -> Result<&'static mut [u8],
         !STORAGE_SEALED.load(Ordering::SeqCst),
         "model storage is sealed: no reads after RAM residency"
     );
-    let mut fs = boot::get_image_file_system(boot::image_handle())
-        .map_err(|e| LoadError::Fs(e.status()))?;
+    let mut fs =
+        boot::get_image_file_system(boot::image_handle()).map_err(|e| LoadError::Fs(e.status()))?;
     let mut root = fs.open_volume().map_err(|e| LoadError::Fs(e.status()))?;
     let path = CString16::try_from("model.nrm").unwrap();
     let handle = root
@@ -47,7 +47,9 @@ pub fn load(progress: &mut dyn FnMut(usize, usize)) -> Result<&'static mut [u8],
         .map_err(|_| LoadError::NotFound)?;
     let mut file = handle.into_regular_file().ok_or(LoadError::NotFound)?;
 
-    let info = file.get_boxed_info::<FileInfo>().map_err(|e| LoadError::Fs(e.status()))?;
+    let info = file
+        .get_boxed_info::<FileInfo>()
+        .map_err(|e| LoadError::Fs(e.status()))?;
     let size = info.file_size() as usize;
     progress(0, size);
 
@@ -63,7 +65,9 @@ pub fn load(progress: &mut dyn FnMut(usize, usize)) -> Result<&'static mut [u8],
     let mut done = 0;
     while done < size {
         let end = (done + CHUNK).min(size);
-        let n = file.read(&mut buf[done..end]).map_err(|e| LoadError::ReadFailed(e.status()))?;
+        let n = file
+            .read(&mut buf[done..end])
+            .map_err(|e| LoadError::ReadFailed(e.status()))?;
         if n == 0 {
             return Err(LoadError::ReadFailed(uefi::Status::END_OF_FILE));
         }

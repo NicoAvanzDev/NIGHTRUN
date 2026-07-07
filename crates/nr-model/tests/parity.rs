@@ -89,7 +89,10 @@ fn qwen_greedy_matches_llama_cpp_short() {
         eprintln!("SKIP: models/qwen3-4b-q4km.nrm not present");
         return;
     };
-    assert_eq!(text, " Paris. The capital of Germany is Berlin. The capital of");
+    assert_eq!(
+        text,
+        " Paris. The capital of Germany is Berlin. The capital of"
+    );
 }
 
 #[test]
@@ -117,7 +120,12 @@ fn qwen_greedy_matches_llama_cpp_long() {
 #[test]
 fn qwen_chat_greedy_matches_llama_cpp() {
     let _guard = serial();
-    let Some(text) = greedy_in("qwen3-4b-q4km.nrm", "What is the capital of France?", 20, true) else {
+    let Some(text) = greedy_in(
+        "qwen3-4b-q4km.nrm",
+        "What is the capital of France?",
+        20,
+        true,
+    ) else {
         eprintln!("SKIP: models/qwen3-4b-q4km.nrm not present");
         return;
     };
@@ -153,19 +161,30 @@ fn qwen_output_head_is_tied_embedding() {
 #[test]
 fn granite_greedy_matches_llama_cpp_capital() {
     let _guard = serial();
-    let Some(text) = greedy_in("granite-4.1-3b-q4km.nrm", "The capital of France is", 12, false)
-    else {
+    let Some(text) = greedy_in(
+        "granite-4.1-3b-q4km.nrm",
+        "The capital of France is",
+        12,
+        false,
+    ) else {
         eprintln!("SKIP: models/granite-4.1-3b-q4km.nrm not present");
         return;
     };
-    assert_eq!(text, " Paris. It is located in the northern part of the country");
+    assert_eq!(
+        text,
+        " Paris. It is located in the northern part of the country"
+    );
 }
 
 #[test]
 fn granite_greedy_matches_llama_cpp_colors() {
     let _guard = serial();
-    let Some(text) = greedy_in("granite-4.1-3b-q4km.nrm", "The three primary colors are", 16, false)
-    else {
+    let Some(text) = greedy_in(
+        "granite-4.1-3b-q4km.nrm",
+        "The three primary colors are",
+        16,
+        false,
+    ) else {
         eprintln!("SKIP: models/granite-4.1-3b-q4km.nrm not present");
         return;
     };
@@ -178,9 +197,12 @@ fn granite_greedy_matches_llama_cpp_colors() {
 #[test]
 fn granite_chat_greedy_matches_llama_cpp() {
     let _guard = serial();
-    let Some(text) =
-        greedy_in("granite-4.1-3b-q4km.nrm", "What is the capital of France?", 20, true)
-    else {
+    let Some(text) = greedy_in(
+        "granite-4.1-3b-q4km.nrm",
+        "What is the capital of France?",
+        20,
+        true,
+    ) else {
         eprintln!("SKIP: models/granite-4.1-3b-q4km.nrm not present");
         return;
     };

@@ -19,7 +19,11 @@ pub struct Surface {
 
 impl Surface {
     pub fn new(width: usize, height: usize) -> Surface {
-        Surface { width, height, buf: vec![0; width * height] }
+        Surface {
+            width,
+            height,
+            buf: vec![0; width * height],
+        }
     }
 
     #[inline]

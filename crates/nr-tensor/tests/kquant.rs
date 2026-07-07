@@ -40,7 +40,11 @@ impl Rng {
 
 fn q8k(v: &[f32]) -> Vec<BlockQ8K> {
     let mut out = vec![
-        BlockQ8K { d: 0.0, qs: [0; QK_K], bsums: [0; QK_K / 16] };
+        BlockQ8K {
+            d: 0.0,
+            qs: [0; QK_K],
+            bsums: [0; QK_K / 16]
+        };
         v.len() / QK_K
     ];
     quantize_q8k(v, &mut out);
@@ -61,7 +65,11 @@ fn q8k_quantization_properties() {
             // Reconstruction error bounded by half a step.
             for (q, &v) in b.qs.iter().zip(chunk) {
                 let back = *q as f32 * b.d;
-                assert!((back - v).abs() <= b.d.abs() * 0.5 + 1e-6, "{back} vs {v} (d={})", b.d);
+                assert!(
+                    (back - v).abs() <= b.d.abs() * 0.5 + 1e-6,
+                    "{back} vs {v} (d={})",
+                    b.d
+                );
             }
         }
     }
@@ -108,7 +116,11 @@ fn q6k_dequant_roundtrip() {
             let sc = d * block.scales[g] as f32;
             let q = if sc != 0.0 {
                 let r = src[i] / sc;
-                let r = if r >= 0.0 { (r + 0.5) as i32 } else { (r - 0.5) as i32 };
+                let r = if r >= 0.0 {
+                    (r + 0.5) as i32
+                } else {
+                    (r - 0.5) as i32
+                };
                 (r + 32).clamp(0, 63) - 32
             } else {
                 0
@@ -126,6 +138,7 @@ fn q6k_dequant_roundtrip() {
 /// The scalar dots must match the "dequantize everything and dot in f32"
 /// formulation almost exactly (same math, different association).
 #[test]
+#[allow(clippy::needless_range_loop)] // i pairs wd[i] with qs[i]
 fn q4k_dot_matches_dequant_reference() {
     let mut rng = Rng(41);
     for blocks in [1usize, 3, 10] {
@@ -158,7 +171,11 @@ fn avx2_matches_scalar_q4k() {
     assert!(nr_tensor::cpu::fast_path(), "test host must have AVX2+FMA");
     let mut rng = Rng(61);
     for blocks in [1usize, 5, 16] {
-        let w: Vec<_> = rng.adversarial(blocks * QK_K).chunks_exact(QK_K).map(quantize_q4k_ref).collect();
+        let w: Vec<_> = rng
+            .adversarial(blocks * QK_K)
+            .chunks_exact(QK_K)
+            .map(quantize_q4k_ref)
+            .collect();
         let x = q8k(&rng.vec(blocks * QK_K));
         let s = dot_q4k_scalar(&w, &x);
         let v = unsafe { kquant::dot_q4k_avx2(&w, &x) };
@@ -175,7 +192,11 @@ fn avx2_matches_scalar_q6k() {
     assert!(nr_tensor::cpu::fast_path(), "test host must have AVX2+FMA");
     let mut rng = Rng(71);
     for blocks in [1usize, 5, 16] {
-        let w: Vec<_> = rng.adversarial(blocks * QK_K).chunks_exact(QK_K).map(quantize_q6k_ref).collect();
+        let w: Vec<_> = rng
+            .adversarial(blocks * QK_K)
+            .chunks_exact(QK_K)
+            .map(quantize_q6k_ref)
+            .collect();
         let x = q8k(&rng.vec(blocks * QK_K));
         let s = dot_q6k_scalar(&w, &x);
         let v = unsafe { kquant::dot_q6k_avx2(&w, &x) };
@@ -207,28 +228,46 @@ fn avx2_matches_scalar_saturated_blocks() {
     };
     let mut rng = Rng(81);
     let x = q8k(&rng.adversarial(QK_K));
-    let (s4, v4) = (dot_q4k_scalar(&[q4], &x), unsafe { kquant::dot_q4k_avx2(&[q4], &x) });
-    assert!((s4 - v4).abs() <= 1e-4 * s4.abs().max(1.0), "q4k: {s4} vs {v4}");
-    let (s6, v6) = (dot_q6k_scalar(&[q6], &x), unsafe { kquant::dot_q6k_avx2(&[q6], &x) });
-    assert!((s6 - v6).abs() <= 1e-4 * s6.abs().max(1.0), "q6k: {s6} vs {v6}");
+    let (s4, v4) = (dot_q4k_scalar(&[q4], &x), unsafe {
+        kquant::dot_q4k_avx2(&[q4], &x)
+    });
+    assert!(
+        (s4 - v4).abs() <= 1e-4 * s4.abs().max(1.0),
+        "q4k: {s4} vs {v4}"
+    );
+    let (s6, v6) = (dot_q6k_scalar(&[q6], &x), unsafe {
+        kquant::dot_q6k_avx2(&[q6], &x)
+    });
+    assert!(
+        (s6 - v6).abs() <= 1e-4 * s6.abs().max(1.0),
+        "q6k: {s6} vs {v6}"
+    );
 }
 
 #[test]
 fn matvec_kquant_matches_dot() {
     let mut rng = Rng(91);
     let (rows, cols) = (48, 512);
-    let w4: Vec<_> = rng.vec(rows * cols).chunks_exact(QK_K).map(quantize_q4k_ref).collect();
+    let w4: Vec<_> = rng
+        .vec(rows * cols)
+        .chunks_exact(QK_K)
+        .map(quantize_q4k_ref)
+        .collect();
     let x = q8k(&rng.vec(cols));
     let mut y = vec![0f32; rows];
     kquant::matvec_q4k(&mut y, &w4, &x, rows, cols);
     let bpr = cols / QK_K;
     for r in 0..rows {
         let expect = dot_q4k_scalar(&w4[r * bpr..(r + 1) * bpr], &x);
-        assert!((y[r] - expect).abs() <= 1e-4 * expect.abs().max(1.0), "row {r}");
+        assert!(
+            (y[r] - expect).abs() <= 1e-4 * expect.abs().max(1.0),
+            "row {r}"
+        );
     }
 }
 
 #[test]
+#[allow(clippy::needless_range_loop)] // i pairs wd[i] with qs[i]
 fn q6k_dot_matches_dequant_reference() {
     let mut rng = Rng(51);
     for blocks in [1usize, 3, 10] {
@@ -261,8 +300,16 @@ fn q6k_dot_matches_dequant_reference() {
 fn matmul_bit_equals_matvec() {
     let mut rng = Rng(101);
     let (rows, cols, batch) = (32, 512, 5);
-    let w4: Vec<_> = rng.vec(rows * cols).chunks_exact(QK_K).map(quantize_q4k_ref).collect();
-    let w6: Vec<_> = rng.vec(rows * cols).chunks_exact(QK_K).map(quantize_q6k_ref).collect();
+    let w4: Vec<_> = rng
+        .vec(rows * cols)
+        .chunks_exact(QK_K)
+        .map(quantize_q4k_ref)
+        .collect();
+    let w6: Vec<_> = rng
+        .vec(rows * cols)
+        .chunks_exact(QK_K)
+        .map(quantize_q6k_ref)
+        .collect();
     let xs = q8k(&rng.vec(batch * cols));
     let bpr = cols / QK_K;
 

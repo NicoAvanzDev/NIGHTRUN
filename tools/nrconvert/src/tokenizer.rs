@@ -44,8 +44,13 @@ pub enum Family {
 }
 
 pub fn build(gguf: &Gguf, family: Family) -> BuiltTokenizer {
-    let model = gguf.kv["tokenizer.ggml.model"].as_str().expect("tokenizer model");
-    assert_eq!(model, "gpt2", "expected byte-level BPE (gpt2-style) tokenizer");
+    let model = gguf.kv["tokenizer.ggml.model"]
+        .as_str()
+        .expect("tokenizer model");
+    assert_eq!(
+        model, "gpt2",
+        "expected byte-level BPE (gpt2-style) tokenizer"
+    );
 
     let tokens = gguf.kv["tokenizer.ggml.tokens"].as_arr().expect("tokens");
     let types: Vec<i32> = gguf.kv["tokenizer.ggml.token_type"]
@@ -58,7 +63,9 @@ pub fn build(gguf: &Gguf, family: Family) -> BuiltTokenizer {
         })
         .collect();
     let merges = gguf.kv["tokenizer.ggml.merges"].as_arr().expect("merges");
-    let eos = gguf.kv["tokenizer.ggml.eos_token_id"].as_u32().expect("eos id");
+    let eos = gguf.kv["tokenizer.ggml.eos_token_id"]
+        .as_u32()
+        .expect("eos id");
     // Qwen has no BOS (its template never emits one); fall back to eos so
     // the slot holds a valid id either way.
     let bos = gguf
@@ -75,7 +82,10 @@ pub fn build(gguf: &Gguf, family: Family) -> BuiltTokenizer {
             Family::Qwen3 => "qwen2",
             Family::Granite => "dbrx", // cl100k-pattern pretokenizer
         };
-        assert_eq!(pre, expect, "pretokenizer mismatch: gguf says {pre:?}, family expects {expect:?}");
+        assert_eq!(
+            pre, expect,
+            "pretokenizer mismatch: gguf says {pre:?}, family expects {expect:?}"
+        );
     }
 
     let u2b = unicode_to_byte();
@@ -99,10 +109,17 @@ pub fn build(gguf: &Gguf, family: Family) -> BuiltTokenizer {
     let mut flags: Vec<u16> = Vec::with_capacity(tokens.len());
     for (id, tok) in tokens.iter().enumerate() {
         let s = tok.as_str().expect("token string");
-        let control = matches!(types.get(id), Some(&TYPE_CONTROL) | Some(&TYPE_USER_DEFINED));
+        let control = matches!(
+            types.get(id),
+            Some(&TYPE_CONTROL) | Some(&TYPE_USER_DEFINED)
+        );
         raw_by_literal.insert(s, id as u32);
         decoded.push(decode(s, control));
-        flags.push(if control { nr_token::blob::FLAG_CONTROL } else { 0 });
+        flags.push(if control {
+            nr_token::blob::FLAG_CONTROL
+        } else {
+            0
+        });
     }
 
     // Reverse index over decoded bytes (first id wins; skip control tokens
@@ -117,6 +134,7 @@ pub fn build(gguf: &Gguf, family: Family) -> BuiltTokenizer {
 
     // Byte -> token id table.
     let mut byte_ids = [0u32; 256];
+    #[allow(clippy::needless_range_loop)] // b is the byte value itself
     for b in 0..256usize {
         let single = [b as u8];
         byte_ids[b] = *by_bytes
@@ -148,7 +166,9 @@ pub fn build(gguf: &Gguf, family: Family) -> BuiltTokenizer {
     resolved.sort_by_key(|&(l, r, _, _)| ((l as u64) << 32) | r as u64);
 
     let lookup_literal = |s: &str| -> u32 {
-        *raw_by_literal.get(s).unwrap_or_else(|| panic!("vocab missing {s}"))
+        *raw_by_literal
+            .get(s)
+            .unwrap_or_else(|| panic!("vocab missing {s}"))
     };
     // Generic special slots (see nr-token::blob): for chatml, <|im_start|>
     // fills start_header and <|im_end|> fills eot; end_header is unused.
@@ -210,5 +230,9 @@ pub fn build(gguf: &Gguf, family: Family) -> BuiltTokenizer {
     }
     blob.extend_from_slice(&pool);
 
-    BuiltTokenizer { blob, vocab: decoded.len(), merges: resolved.len() }
+    BuiltTokenizer {
+        blob,
+        vocab: decoded.len(),
+        merges: resolved.len(),
+    }
 }

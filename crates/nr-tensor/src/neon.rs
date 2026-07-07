@@ -289,8 +289,7 @@ pub mod kquant {
                     let xp = bx.qs.as_ptr().add(j * 32);
                     let sub = dot_i8x32::<SDOT>(w0, w1, vld1q_s8(xp), vld1q_s8(xp.add(16)));
                     sum_q[lane] += sc as f32 * sub as f32;
-                    sum_m[lane] +=
-                        m as i32 * (bx.bsums[2 * j] as i32 + bx.bsums[2 * j + 1] as i32);
+                    sum_m[lane] += m as i32 * (bx.bsums[2 * j] as i32 + bx.bsums[2 * j + 1] as i32);
                 }
             }
             for lane in 0..4 {

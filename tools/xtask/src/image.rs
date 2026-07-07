@@ -7,7 +7,9 @@ use std::path::Path;
 const LB: u64 = 512;
 
 pub fn build(img_path: &Path, efi: &Path, model: Option<&Path>, boot_file: &str) {
-    let model_size = model.map(|m| std::fs::metadata(m).expect("model file").len()).unwrap_or(0);
+    let model_size = model
+        .map(|m| std::fs::metadata(m).expect("model file").len())
+        .unwrap_or(0);
     let efi_size = std::fs::metadata(efi).expect("efi binary").len();
 
     // ESP sized for contents + FAT32 overhead + slack.
@@ -44,15 +46,10 @@ pub fn build(img_path: &Path, efi: &Path, model: Option<&Path>, boot_file: &str)
         .logical_block_size(gpt::disk::LogicalBlockSize::Lb512)
         .open_from_device(Box::new(&mut file))
         .expect("open gpt");
-    disk.update_partitions(Default::default()).expect("init partitions");
-    disk.add_partition(
-        "NIGHTRUN",
-        esp_bytes,
-        gpt::partition_types::EFI,
-        0,
-        None,
-    )
-    .expect("add esp");
+    disk.update_partitions(Default::default())
+        .expect("init partitions");
+    disk.add_partition("NIGHTRUN", esp_bytes, gpt::partition_types::EFI, 0, None)
+        .expect("add esp");
     let (start_lba, end_lba) = {
         let p = &disk.partitions()[&1];
         (p.first_lba, p.last_lba)
@@ -84,11 +81,7 @@ pub fn build(img_path: &Path, efi: &Path, model: Option<&Path>, boot_file: &str)
     println!("image ready: {}", img_path.display());
 }
 
-fn copy_into<IO: fatfs::ReadWriteSeek>(
-    dir: &fatfs::Dir<'_, IO>,
-    name: &str,
-    src: &Path,
-) {
+fn copy_into<IO: fatfs::ReadWriteSeek>(dir: &fatfs::Dir<'_, IO>, name: &str, src: &Path) {
     let mut src_file = std::fs::File::open(src).expect("open source");
     let mut dst = dir.create_file(name).expect("create in image");
     dst.truncate().unwrap();
@@ -103,7 +96,11 @@ fn copy_into<IO: fatfs::ReadWriteSeek>(
         dst.write_all(&buf[..n]).unwrap();
         done += n as u64;
         if total > 64 * 1024 * 1024 {
-            print!("\r  {name}: {} / {} MB", done / (1024 * 1024), total / (1024 * 1024));
+            print!(
+                "\r  {name}: {} / {} MB",
+                done / (1024 * 1024),
+                total / (1024 * 1024)
+            );
             std::io::stdout().flush().unwrap();
         }
     }
@@ -130,7 +127,9 @@ pub fn build_pi(img_path: &Path, efi: &Path, model: Option<&Path>, firmware_dir:
     );
     assert!(fw_cfg.exists(), "missing assets/pi5/config.txt");
 
-    let model_size = model.map(|m| std::fs::metadata(m).expect("model file").len()).unwrap_or(0);
+    let model_size = model
+        .map(|m| std::fs::metadata(m).expect("model file").len())
+        .unwrap_or(0);
     let contents = model_size
         + std::fs::metadata(efi).unwrap().len()
         + std::fs::metadata(&fw_fd).unwrap().len();
@@ -195,7 +194,11 @@ pub fn build_pi(img_path: &Path, efi: &Path, model: Option<&Path>, firmware_dir:
             }
         }
         let overlays = root.create_dir("overlays").unwrap();
-        copy_into(&overlays, "bcm2712d0.dtbo", &dtb_dir.join("overlays/bcm2712d0.dtbo"));
+        copy_into(
+            &overlays,
+            "bcm2712d0.dtbo",
+            &dtb_dir.join("overlays/bcm2712d0.dtbo"),
+        );
         let boot = root.create_dir("EFI").unwrap().create_dir("BOOT").unwrap();
         copy_into(&boot, "BOOTAA64.EFI", efi);
         if let Some(model) = model {
@@ -209,7 +212,11 @@ pub fn build_pi(img_path: &Path, efi: &Path, model: Option<&Path>, firmware_dir:
 
 /// Overwrite just the boot EFI inside an existing image (fast dev loop).
 pub fn update_efi(img_path: &Path, efi: &Path, boot_file: &str) -> bool {
-    let Ok(mut file) = std::fs::OpenOptions::new().read(true).write(true).open(img_path) else {
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(img_path)
+    else {
         return false;
     };
     let Ok(disk) = gpt::GptConfig::new()
@@ -219,15 +226,22 @@ pub fn update_efi(img_path: &Path, efi: &Path, boot_file: &str) -> bool {
     else {
         return false;
     };
-    let Some(p) = disk.partitions().get(&1).cloned() else { return false };
+    let Some(p) = disk.partitions().get(&1).cloned() else {
+        return false;
+    };
     drop(disk);
     file.seek(SeekFrom::Start(0)).unwrap();
-    let slice = fscommon::StreamSlice::new(&mut file, p.first_lba * LB, (p.last_lba + 1) * LB).unwrap();
+    let slice =
+        fscommon::StreamSlice::new(&mut file, p.first_lba * LB, (p.last_lba + 1) * LB).unwrap();
     let buf = fscommon::BufStream::new(slice);
-    let Ok(fs) = fatfs::FileSystem::new(buf, fatfs::FsOptions::new()) else { return false };
+    let Ok(fs) = fatfs::FileSystem::new(buf, fatfs::FsOptions::new()) else {
+        return false;
+    };
     {
         let root = fs.root_dir();
-        let Ok(boot) = root.open_dir("EFI/BOOT") else { return false };
+        let Ok(boot) = root.open_dir("EFI/BOOT") else {
+            return false;
+        };
         copy_into(&boot, boot_file, efi);
     }
     fs.unmount().is_ok()

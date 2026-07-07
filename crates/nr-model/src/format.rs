@@ -103,12 +103,22 @@ pub enum TensorDtype {
 
 impl TensorDtype {
     /// Bytes required for `n` elements (n must divide the block size).
+    /// Checked: absurd element counts return None instead of wrapping.
     pub fn byte_size(self, n: u64) -> Option<u64> {
         match self {
-            TensorDtype::F32 => Some(n * 4),
-            TensorDtype::Q8_0 => (n % 32 == 0).then(|| n / 32 * 34),
-            TensorDtype::Q4K => (n % 256 == 0).then(|| n / 256 * 144),
-            TensorDtype::Q6K => (n % 256 == 0).then(|| n / 256 * 210),
+            TensorDtype::F32 => n.checked_mul(4),
+            TensorDtype::Q8_0 => n
+                .is_multiple_of(32)
+                .then_some(n / 32)
+                .and_then(|b| b.checked_mul(34)),
+            TensorDtype::Q4K => n
+                .is_multiple_of(256)
+                .then_some(n / 256)
+                .and_then(|b| b.checked_mul(144)),
+            TensorDtype::Q6K => n
+                .is_multiple_of(256)
+                .then_some(n / 256)
+                .and_then(|b| b.checked_mul(210)),
         }
     }
 }
@@ -175,7 +185,14 @@ pub struct TensorView<'a> {
 impl<'a> TensorView<'a> {
     pub fn f32(&self) -> &'a [f32] {
         assert_eq!(self.dtype, TensorDtype::F32);
-        // SAFETY: converter emits 64-byte-aligned little-endian f32 data.
+        // Belt over the parse-time alignment gate: the reinterpretation
+        // below is UB on a misaligned pointer.
+        assert_eq!(
+            self.bytes.as_ptr() as usize % core::mem::align_of::<f32>(),
+            0
+        );
+        // SAFETY: length is a multiple of 4 by construction (byte_size),
+        // alignment asserted above; f32 accepts any bit pattern.
         unsafe {
             core::slice::from_raw_parts(self.bytes.as_ptr() as *const f32, self.bytes.len() / 4)
         }
@@ -303,9 +320,17 @@ impl<'a> Model<'a> {
             return Err(ParseError::BadTable);
         }
 
-        let table_end = table_off + tensor_count * ENTRY_SIZE;
-        if blob.len() < table_end || blob.len() < data_off + data_size || blob.len() < tok_off + tok_size
-        {
+        // All region bounds use checked arithmetic: a crafted header must
+        // produce a clean ParseError, never a wrapped sum that panics (or
+        // worse) at slice time.
+        let region_end = |off: usize, len: usize| off.checked_add(len);
+        let table_len = tensor_count
+            .checked_mul(ENTRY_SIZE)
+            .ok_or(ParseError::BadTable)?;
+        let table_end = region_end(table_off, table_len).ok_or(ParseError::TooShort)?;
+        let data_end = region_end(data_off, data_size).ok_or(ParseError::TooShort)?;
+        let tok_end = region_end(tok_off, tok_size).ok_or(ParseError::TooShort)?;
+        if blob.len() < table_end || blob.len() < data_end || blob.len() < tok_end {
             return Err(ParseError::TooShort);
         }
 
@@ -313,11 +338,14 @@ impl<'a> Model<'a> {
         let mut crc = crate::crc32::Crc32::new();
         crc.update(&blob[..HEADER_SIZE - 8]);
         crc.update(&[0u8; 8]);
-        crc.update(&blob[tok_off..tok_off + tok_size]);
+        crc.update(&blob[tok_off..tok_end]);
         crc.update(&blob[table_off..table_end]);
         let got = crc.finish();
         if got != meta_crc {
-            return Err(ParseError::MetaCrc { expect: meta_crc, got });
+            return Err(ParseError::MetaCrc {
+                expect: meta_crc,
+                got,
+            });
         }
 
         let mut entries = Vec::with_capacity(tensor_count);
@@ -337,23 +365,41 @@ impl<'a> Model<'a> {
             let size = tc.u64();
             let rows = tc.u32();
             let cols = tc.u32();
-            if offset as usize + size as usize > data_size {
+            // Checked end + within the data section (no wrapping sums).
+            let end = offset.checked_add(size).ok_or(ParseError::BadTable)?;
+            if end > data_size as u64 {
+                return Err(ParseError::BadTable);
+            }
+            // The converter 64-byte-aligns every tensor; TensorView::f32
+            // relies on it for the &[f32] reinterpretation, so a
+            // misaligned offset is a hard reject (UB guard, not style).
+            if offset % DATA_ALIGN as u64 != 0 {
                 return Err(ParseError::BadTable);
             }
             // Size must agree exactly with dtype block math (catches
             // malformed payloads and non-block-aligned dimensions).
-            let n = rows as u64 * cols as u64;
+            let n = (rows as u64)
+                .checked_mul(cols as u64)
+                .ok_or(ParseError::BadTable)?;
             if dtype.byte_size(n) != Some(size) {
                 return Err(ParseError::BadTable);
             }
-            entries.push(TensorEntry { kind, layer, dtype, offset, size, rows, cols });
+            entries.push(TensorEntry {
+                kind,
+                layer,
+                dtype,
+                offset,
+                size,
+                rows,
+                cols,
+            });
         }
 
         Ok(Model {
             meta,
             entries,
-            tokenizer_blob: &blob[tok_off..tok_off + tok_size],
-            data: &blob[data_off..data_off + data_size],
+            tokenizer_blob: &blob[tok_off..tok_end],
+            data: &blob[data_off..data_end],
             data_crc,
             blob,
         })

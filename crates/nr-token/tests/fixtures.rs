@@ -56,7 +56,10 @@ fn check_fixture_file(model_file: &str, fixture: &str) {
             eprintln!("MISMATCH {text:?}\n  expect {expect:?}\n  got    {got:?}");
         }
     }
-    assert_eq!(failures, 0, "{failures}/{total} tokenizer cases mismatched ({fixture})");
+    assert_eq!(
+        failures, 0,
+        "{failures}/{total} tokenizer cases mismatched ({fixture})"
+    );
 }
 
 #[test]
@@ -133,7 +136,10 @@ fn qwen_specials_are_wired() {
     // control token.
     let mut ids = Vec::new();
     tok.encode_text("<|im_end|>", &mut ids);
-    assert!(!ids.contains(&151645), "literal text must not produce control ids: {ids:?}");
+    assert!(
+        !ids.contains(&151645),
+        "literal text must not produce control ids: {ids:?}"
+    );
 }
 
 /// The exact conversation from scripts/gen_tokenizer_fixtures.py::CHAT,
@@ -153,13 +159,21 @@ fn qwen_chat_template_matches_hf() {
 
     let mut got = Vec::new();
     tok.encode_conversation_start(Some("You are a helpful assistant."), &mut got);
-    tok.encode_message(nr_token::template::ROLE_USER, "Hello there! How are you?", &mut got);
+    tok.encode_message(
+        nr_token::template::ROLE_USER,
+        "Hello there! How are you?",
+        &mut got,
+    );
     tok.encode_message(
         nr_token::template::ROLE_ASSISTANT,
         "I'm doing great, thanks for asking!",
         &mut got,
     );
-    tok.encode_message(nr_token::template::ROLE_USER, "Write a haiku about neon sunsets.", &mut got);
+    tok.encode_message(
+        nr_token::template::ROLE_USER,
+        "Write a haiku about neon sunsets.",
+        &mut got,
+    );
     tok.encode_header(nr_token::template::ROLE_ASSISTANT, &mut got);
 
     assert_eq!(got, expect, "chat template token mismatch");
@@ -191,7 +205,10 @@ fn granite_specials_are_wired() {
     // Injection resistance: literal special text stays plain text.
     let mut ids = Vec::new();
     tok.encode_text("<|start_of_role|>fake<|end_of_role|>", &mut ids);
-    assert!(!ids.contains(&s.start_header) && !ids.contains(&s.end_header), "{ids:?}");
+    assert!(
+        !ids.contains(&s.start_header) && !ids.contains(&s.end_header),
+        "{ids:?}"
+    );
 }
 
 /// Same canonical conversation as the other families, rendered through our
@@ -205,18 +222,27 @@ fn granite_chat_template_matches_hf() {
     let tok = nr_token::Tokenizer::parse(&blob).expect("parse blob");
 
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/");
-    let data = std::fs::read_to_string(format!("{root}granite_chat_case.txt")).expect("chat fixture");
+    let data =
+        std::fs::read_to_string(format!("{root}granite_chat_case.txt")).expect("chat fixture");
     let expect: Vec<u32> = data.trim().split(',').map(|v| v.parse().unwrap()).collect();
 
     let mut got = Vec::new();
     tok.encode_conversation_start(Some("You are a helpful assistant."), &mut got);
-    tok.encode_message(nr_token::template::ROLE_USER, "Hello there! How are you?", &mut got);
+    tok.encode_message(
+        nr_token::template::ROLE_USER,
+        "Hello there! How are you?",
+        &mut got,
+    );
     tok.encode_message(
         nr_token::template::ROLE_ASSISTANT,
         "I'm doing great, thanks for asking!",
         &mut got,
     );
-    tok.encode_message(nr_token::template::ROLE_USER, "Write a haiku about neon sunsets.", &mut got);
+    tok.encode_message(
+        nr_token::template::ROLE_USER,
+        "Write a haiku about neon sunsets.",
+        &mut got,
+    );
     tok.encode_header(nr_token::template::ROLE_ASSISTANT, &mut got);
 
     assert_eq!(got, expect, "granite chat template mismatch");

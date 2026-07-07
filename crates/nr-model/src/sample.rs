@@ -13,7 +13,11 @@ const TOP_K: usize = 64;
 
 impl Sampler {
     pub fn new(temperature: f32, top_p: f32, seed: u64) -> Sampler {
-        Sampler { temperature, top_p, rng: seed | 1 }
+        Sampler {
+            temperature,
+            top_p,
+            rng: seed | 1,
+        }
     }
 
     fn next_f32(&mut self) -> f32 {

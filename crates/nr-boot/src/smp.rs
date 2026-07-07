@@ -30,7 +30,12 @@ pub fn start_workers() -> (usize, &'static str) {
         return (0, "MP processor count failed");
     };
     let aps = count.enabled.saturating_sub(1);
-    serial_println!("[smp] {} processors ({} enabled), {} APs", count.total, count.enabled, aps);
+    serial_println!(
+        "[smp] {} processors ({} enabled), {} APs",
+        count.total,
+        count.enabled,
+        aps
+    );
     if aps == 0 {
         return (0, "single core");
     }
@@ -49,9 +54,17 @@ pub fn start_workers() -> (usize, &'static str) {
         let event = unsafe {
             boot::create_event(boot::EventType::empty(), boot::Tpl::APPLICATION, None, None)
         };
-        let Ok(event) = event else { return (0, "event create failed") };
+        let Ok(event) = event else {
+            return (0, "event create failed");
+        };
         unsafe {
-            mp.startup_all_aps(false, worker_entry, core::ptr::null_mut(), Some(event), None)
+            mp.startup_all_aps(
+                false,
+                worker_entry,
+                core::ptr::null_mut(),
+                Some(event),
+                None,
+            )
         }
     } else {
         match unsafe {

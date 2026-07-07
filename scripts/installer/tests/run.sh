@@ -184,6 +184,39 @@ t "logs: timestamped path shape" bash -c '
     p="build/nightrun-installer-logs/20260707-120000"
     [[ "$p" =~ ^build/nightrun-installer-logs/[0-9]{8}-[0-9]{6}$ ]]'
 
+# ---- live protected-disk resolution (host, read-only) ----
+live_protected="$(NR_PROTECTED_FIXTURE='' nr_protected_disks)"
+root_disk="$(lsblk -snlo NAME -- "$(findmnt -no SOURCE --target /)" 2>/dev/null | tail -1)"
+t "live: root physical disk is protected" grep -qx "/dev/$root_disk" <<<"$live_protected"
+t "live: protected paths are clean /dev entries" bash -c '! grep -qvE "^/dev/[a-zA-Z0-9_-]+$" <<<"$1"' _ "$live_protected"
+
+# ---- readback verification math (regular files, no devices) ----
+# shellcheck source=../lib/verify.sh
+source "$LIB/verify.sh"
+# test seam: no sudo; drop O_DIRECT (regular files may reject it)
+# shellcheck disable=SC2317  # invoked indirectly through nr_readback_sha
+nr_dd() {
+    local a=() x
+    for x in "$@"; do [[ "$x" == iflag=direct ]] || a+=("$x"); done
+    command dd "${a[@]}"
+}
+rb_img="$NR_TMPDIR/rb-image.bin"
+rb_dev="$NR_TMPDIR/rb-device.bin"
+head -c $(( 3 * 4194304 + 123 )) /dev/urandom > "$rb_img"   # odd size: 3 blocks + 123B tail
+cp -- "$rb_img" "$rb_dev"
+head -c 4096 /dev/urandom >> "$rb_dev"   # media larger than image, remainder must be ignored
+rb_want="$(sha256sum -- "$rb_img" | cut -d' ' -f1)"
+rb_got="$(nr_readback_sha "$rb_dev" "$(stat -c%s -- "$rb_img")" /dev/null 2>/dev/null)"
+t "readback: odd-size image hashes exactly (tail path)" test "$rb_got" = "$rb_want"
+printf 'X' | dd of="$rb_dev" bs=1 seek=$(( 3 * 4194304 + 60 )) conv=notrunc status=none
+rb_got="$(nr_readback_sha "$rb_dev" "$(stat -c%s -- "$rb_img")" /dev/null 2>/dev/null)"
+t "readback: tail corruption detected" test "$rb_got" != "$rb_want"
+cp -- "$rb_img" "$rb_dev"
+printf 'X' | dd of="$rb_dev" bs=1 seek=1000000 conv=notrunc status=none
+rb_got="$(nr_readback_sha "$rb_dev" "$(stat -c%s -- "$rb_img")" /dev/null 2>/dev/null)"
+t "readback: slice corruption detected" test "$rb_got" != "$rb_want"
+unset -f nr_dd
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 (( FAIL == 0 ))

@@ -22,32 +22,8 @@ nr_verify_flow() {
 
     nr_note "Comparing written NightRun image with the source image..."
     local log="$NR_LOG_DIR/verify.log"
-    local block=$(( 4 * 1024 * 1024 ))
-    local per_slice=32
-    local total_blocks=$(( NR_IMAGE_BYTES / block ))
-    local tail_bytes=$(( NR_IMAGE_BYTES % block ))
     local got
-
-    # Slices stream into a single sha256sum; progress goes to the tty via
-    # stderr so it never contaminates the hashed stream.
-    got="$(
-        {
-            local read_blocks=0 count
-            while (( read_blocks < total_blocks )); do
-                count=$(( total_blocks - read_blocks ))
-                (( count > per_slice )) && count=$per_slice
-                sudo dd if="$NR_SEL_PATH" bs=4M skip="$read_blocks" count="$count" \
-                     iflag=direct status=none 2>>"$log" || exit 1
-                read_blocks=$(( read_blocks + count ))
-                nr_progress $(( read_blocks * block )) "$NR_IMAGE_BYTES" "reading back" >&2
-            done
-            if (( tail_bytes > 0 )); then
-                sudo dd if="$NR_SEL_PATH" bs=1 skip=$(( total_blocks * block )) \
-                     count="$tail_bytes" status=none 2>>"$log" || exit 1
-                nr_progress "$NR_IMAGE_BYTES" "$NR_IMAGE_BYTES" "reading back" >&2
-            fi
-        } | sha256sum | cut -d' ' -f1
-    )"
+    got="$(nr_readback_sha "$NR_SEL_PATH" "$NR_IMAGE_BYTES" "$log")"
 
     if [[ "$got" != "$NR_IMAGE_SHA" ]]; then
         nr_error "VERIFICATION FAILED — the written data does not match the image."
@@ -106,4 +82,37 @@ nr_completion_screen() {
     echo
     nr_wordmark
     echo
+}
+
+# Privileged read wrapper — a seam the test suite overrides to exercise
+# the readback math against regular files without sudo or real devices.
+nr_dd() { sudo dd "$@"; }
+
+# SHA-256 of exactly `bytes` from the start of `dev`, streamed in 4 MiB
+# slices plus a byte-exact tail (images need not be block-multiples).
+# Progress goes to stderr so it never contaminates the hashed stream.
+# Fail-safe by construction: any failed read yields a partial-stream
+# digest, which can never equal the expected image digest.
+nr_readback_sha() {
+    local dev="$1" bytes="$2" log="$3"
+    local block=$(( 4 * 1024 * 1024 ))
+    local per_slice=32
+    local total_blocks=$(( bytes / block ))
+    local tail_bytes=$(( bytes % block ))
+    {
+        local read_blocks=0 count
+        while (( read_blocks < total_blocks )); do
+            count=$(( total_blocks - read_blocks ))
+            (( count > per_slice )) && count=$per_slice
+            nr_dd if="$dev" bs=4M skip="$read_blocks" count="$count" \
+                 iflag=direct status=none 2>>"$log" || exit 1
+            read_blocks=$(( read_blocks + count ))
+            nr_progress $(( read_blocks * block )) "$bytes" "reading back" >&2
+        done
+        if (( tail_bytes > 0 )); then
+            nr_dd if="$dev" bs=1 skip=$(( total_blocks * block )) \
+                 count="$tail_bytes" status=none 2>>"$log" || exit 1
+            nr_progress "$bytes" "$bytes" "reading back" >&2
+        fi
+    } | sha256sum | cut -d' ' -f1
 }

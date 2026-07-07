@@ -145,7 +145,11 @@ pub fn dequant_q6k(b: &BlockQ6K, out: &mut [f32]) {
 fn nearest_int(v: f32) -> i32 {
     // Round-to-nearest, ties away from zero (matches ggml's nearest_int
     // for the value ranges seen here).
-    if v >= 0.0 { (v + 0.5) as i32 } else { (v - 0.5) as i32 }
+    if v >= 0.0 {
+        (v + 0.5) as i32
+    } else {
+        (v - 0.5) as i32
+    }
 }
 
 /// Quantize f32 activations (length divisible by 256) into Q8_K blocks,
@@ -184,6 +188,7 @@ pub fn quantize_q8k(src: &[f32], out: &mut [BlockQ8K]) {
 
 // ---- Scalar reference dot products ----------------------------------------
 
+#[allow(clippy::needless_range_loop)] // j pairs mins[j] with bsums[2j..]
 pub fn dot_q4k_scalar(w: &[BlockQ4K], x: &[BlockQ8K]) -> f32 {
     let mut sumf = 0f32;
     for (bw, bx) in w.iter().zip(x.iter()) {
@@ -251,6 +256,7 @@ pub fn dot_q6k_scalar(w: &[BlockQ6K], x: &[BlockQ8K]) -> f32 {
 /// (see [`crate::cpu::fast_path`]).
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma")]
+#[allow(clippy::needless_range_loop)] // j pairs mins[j] with bsums[2j..]
 pub unsafe fn dot_q4k_avx2(w: &[BlockQ4K], x: &[BlockQ8K]) -> f32 {
     use core::arch::x86_64::*;
 
@@ -307,6 +313,7 @@ pub unsafe fn dot_q4k_avx2(w: &[BlockQ4K], x: &[BlockQ8K]) -> f32 {
 /// Caller must ensure AVX2+FMA are supported and YMM state is enabled.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma")]
+#[allow(clippy::needless_range_loop)] // j pairs mins[j] with bsums[2j..]
 pub unsafe fn dot_q4k_avx2_x4(w: &[BlockQ4K], xs: [&[BlockQ8K]; 4]) -> [f32; 4] {
     use core::arch::x86_64::*;
 
@@ -392,7 +399,10 @@ pub unsafe fn dot_q6k_avx2_x4(w: &[BlockQ6K], xs: [&[BlockQ8K]; 4]) -> [f32; 4] 
             let sc = &scales[half * 8..half * 8 + 8];
 
             let scale = |g: usize| -> __m256i {
-                _mm256_set_m128i(_mm_set1_epi16(sc[g + 1] as i16), _mm_set1_epi16(sc[g] as i16))
+                _mm256_set_m128i(
+                    _mm_set1_epi16(sc[g + 1] as i16),
+                    _mm_set1_epi16(sc[g] as i16),
+                )
             };
 
             let q4bits1 = _mm256_loadu_si256(ql_ptr as *const __m256i);
@@ -429,7 +439,12 @@ pub unsafe fn dot_q6k_avx2_x4(w: &[BlockQ6K], xs: [&[BlockQ8K]; 4]) -> [f32; 4] 
             acc[lane] = _mm256_fmadd_ps(d, _mm256_cvtepi32_ps(sumi[lane]), acc[lane]);
         }
     }
-    [hsum256(acc[0]), hsum256(acc[1]), hsum256(acc[2]), hsum256(acc[3])]
+    [
+        hsum256(acc[0]),
+        hsum256(acc[1]),
+        hsum256(acc[2]),
+        hsum256(acc[3]),
+    ]
 }
 
 /// # Safety
@@ -458,7 +473,10 @@ pub unsafe fn dot_q6k_avx2(w: &[BlockQ6K], x: &[BlockQ8K]) -> f32 {
             // i16-lane scale vectors matching maddubs group layout:
             // low 128-bit lane = bytes 0..16 (group g), high = 16..32 (g+1).
             let scale = |g: usize| -> __m256i {
-                _mm256_set_m128i(_mm_set1_epi16(sc[g + 1] as i16), _mm_set1_epi16(sc[g] as i16))
+                _mm256_set_m128i(
+                    _mm_set1_epi16(sc[g + 1] as i16),
+                    _mm_set1_epi16(sc[g] as i16),
+                )
             };
 
             let q4bits1 = _mm256_loadu_si256(ql_ptr as *const __m256i);
@@ -571,12 +589,15 @@ macro_rules! kquant_matmul {
                     while fast && b + 4 <= batch {
                         let vs = unsafe {
                             // SAFETY: fast_path() verified AVX2+FMA+YMM.
-                            $avx2_x4(row, [
-                                &xs[b * bpr..(b + 1) * bpr],
-                                &xs[(b + 1) * bpr..(b + 2) * bpr],
-                                &xs[(b + 2) * bpr..(b + 3) * bpr],
-                                &xs[(b + 3) * bpr..(b + 4) * bpr],
-                            ])
+                            $avx2_x4(
+                                row,
+                                [
+                                    &xs[b * bpr..(b + 1) * bpr],
+                                    &xs[(b + 1) * bpr..(b + 2) * bpr],
+                                    &xs[(b + 2) * bpr..(b + 3) * bpr],
+                                    &xs[(b + 3) * bpr..(b + 4) * bpr],
+                                ],
+                            )
                         };
                         for (i, v) in vs.into_iter().enumerate() {
                             // SAFETY: rows disjoint per worker; each (b, r) once.
@@ -602,8 +623,20 @@ macro_rules! kquant_matmul {
     };
 }
 
-kquant_matmul!(matmul_q4k, BlockQ4K, dot_q4k_scalar, simd::dot_q4k, simd::dot_q4k_x4);
-kquant_matmul!(matmul_q6k, BlockQ6K, dot_q6k_scalar, simd::dot_q6k, simd::dot_q6k_x4);
+kquant_matmul!(
+    matmul_q4k,
+    BlockQ4K,
+    dot_q4k_scalar,
+    simd::dot_q4k,
+    simd::dot_q4k_x4
+);
+kquant_matmul!(
+    matmul_q6k,
+    BlockQ6K,
+    dot_q6k_scalar,
+    simd::dot_q6k,
+    simd::dot_q6k_x4
+);
 
 // ---- Test-support quantizers (host reference; converter uses GGUF bytes) --
 
@@ -632,8 +665,16 @@ pub fn quantize_q4k_ref(src: &[f32]) -> BlockQ4K {
     let mut scales6 = [0u8; 8];
     let mut mins6 = [0u8; 8];
     for j in 0..8 {
-        scales6[j] = if df > 0.0 { nearest_int(sub_scale[j] / df).clamp(0, 63) as u8 } else { 0 };
-        mins6[j] = if dminf > 0.0 { nearest_int(sub_min[j] / dminf).clamp(0, 63) as u8 } else { 0 };
+        scales6[j] = if df > 0.0 {
+            nearest_int(sub_scale[j] / df).clamp(0, 63) as u8
+        } else {
+            0
+        };
+        mins6[j] = if dminf > 0.0 {
+            nearest_int(sub_min[j] / dminf).clamp(0, 63) as u8
+        } else {
+            0
+        };
     }
     let mut scales = [0u8; 12];
     for j in 0..4 {
@@ -650,7 +691,11 @@ pub fn quantize_q4k_ref(src: &[f32]) -> BlockQ4K {
         let chunk = j / 2;
         let hi = j % 2 == 1;
         for k in 0..32 {
-            let q = if sc > 0.0 { nearest_int((s[k] + m) / sc).clamp(0, 15) as u8 } else { 0 };
+            let q = if sc > 0.0 {
+                nearest_int((s[k] + m) / sc).clamp(0, 15) as u8
+            } else {
+                0
+            };
             if hi {
                 qs[chunk * 32 + k] |= q << 4;
             } else {
@@ -658,7 +703,12 @@ pub fn quantize_q4k_ref(src: &[f32]) -> BlockQ4K {
             }
         }
     }
-    BlockQ4K { d: f32_to_f16(d), dmin: f32_to_f16(dmin), scales, qs }
+    BlockQ4K {
+        d: f32_to_f16(d),
+        dmin: f32_to_f16(dmin),
+        scales,
+        qs,
+    }
 }
 
 /// Build a Q6_K block from 256 f32 values (simplified reference).
@@ -667,7 +717,9 @@ pub fn quantize_q6k_ref(src: &[f32]) -> BlockQ6K {
     // Per-16 scales against one super-scale.
     let mut group_amax = [0f32; 16];
     for g in 0..16 {
-        group_amax[g] = src[g * 16..g * 16 + 16].iter().fold(0f32, |m, &v| m.max(v.abs()));
+        group_amax[g] = src[g * 16..g * 16 + 16]
+            .iter()
+            .fold(0f32, |m, &v| m.max(v.abs()));
     }
     let amax = group_amax.iter().fold(0f32, |m, &v| m.max(v));
     let d = amax / (127.0 * 31.0);
@@ -689,7 +741,11 @@ pub fn quantize_q6k_ref(src: &[f32]) -> BlockQ6K {
                 let g = (half * 128 + slot * 32 + l) / 16;
                 let sc = df * scales[g] as f32;
                 let v = src[half * 128 + slot * 32 + l];
-                let q = if sc != 0.0 { (nearest_int(v / sc) + 32).clamp(0, 63) as u8 } else { 32 };
+                let q = if sc != 0.0 {
+                    (nearest_int(v / sc) + 32).clamp(0, 63) as u8
+                } else {
+                    32
+                };
                 let (lo, hi_bits) = (q & 0x0F, (q >> 4) & 3);
                 let qli = half * 64 + ql_idx;
                 if hi {
@@ -706,5 +762,10 @@ pub fn quantize_q6k_ref(src: &[f32]) -> BlockQ6K {
             set(3, 0, 6, l + 32, true); // q4: ql[l+32] high, qh bits 6-7
         }
     }
-    BlockQ6K { ql, qh, scales, d: f32_to_f16(d) }
+    BlockQ6K {
+        ql,
+        qh,
+        scales,
+        d: f32_to_f16(d),
+    }
 }

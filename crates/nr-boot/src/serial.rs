@@ -70,7 +70,10 @@ mod imp {
         // GetProtocol (non-exclusive): the firmware console may also own
         // this port; we only ever append output bytes.
         let Ok(serial) = (unsafe {
-            uefi::boot::open_protocol::<Serial>(params, uefi::boot::OpenProtocolAttributes::GetProtocol)
+            uefi::boot::open_protocol::<Serial>(
+                params,
+                uefi::boot::OpenProtocolAttributes::GetProtocol,
+            )
         }) else {
             return;
         };

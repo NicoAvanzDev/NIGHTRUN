@@ -19,26 +19,3 @@ document.querySelectorAll("pre[data-copy]").forEach((pre) => {
   pre.appendChild(btn);
 });
 
-// Docs table-of-contents: highlight the section currently in view.
-const toc = document.querySelector(".toc");
-if (toc && "IntersectionObserver" in window) {
-  const links = new Map(
-    [...toc.querySelectorAll("a[href^='#']")].map((a) => [a.getAttribute("href").slice(1), a])
-  );
-  const observer = new IntersectionObserver(
-    (entries) => {
-      entries.forEach((e) => {
-        const link = links.get(e.target.id);
-        if (link && e.isIntersecting) {
-          links.forEach((l) => l.classList.remove("active"));
-          link.classList.add("active");
-        }
-      });
-    },
-    { rootMargin: "0px 0px -70% 0px" }
-  );
-  links.forEach((_, id) => {
-    const el = document.getElementById(id);
-    if (el) observer.observe(el);
-  });
-}

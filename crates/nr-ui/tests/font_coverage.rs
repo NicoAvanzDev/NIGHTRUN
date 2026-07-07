@@ -29,7 +29,10 @@ fn fonts_cover_expected_ranges() {
         assert_eq!(nr_gfx::draw::substitute('—'), Some('-'));
         // Emoji are not covered: must be None (renderer skips them).
         for ch in "😊🌆🦙👍🚀".chars() {
-            assert!(font.glyph(ch).is_none(), "{name}: unexpected glyph for {ch:?}");
+            assert!(
+                font.glyph(ch).is_none(),
+                "{name}: unexpected glyph for {ch:?}"
+            );
         }
     }
 }

@@ -44,13 +44,26 @@ impl Rng {
 }
 
 fn q8(v: &[f32]) -> Vec<BlockQ8_0> {
-    let mut out = vec![BlockQ8_0 { d: 0, qs: [0; QK8_0] }; v.len() / QK8_0];
+    let mut out = vec![
+        BlockQ8_0 {
+            d: 0,
+            qs: [0; QK8_0]
+        };
+        v.len() / QK8_0
+    ];
     q8::quantize(v, &mut out);
     out
 }
 
 fn q8k(v: &[f32]) -> Vec<BlockQ8K> {
-    let mut out = vec![BlockQ8K { d: 0.0, qs: [0; QK_K], bsums: [0; QK_K / 16] }; v.len() / QK_K];
+    let mut out = vec![
+        BlockQ8K {
+            d: 0.0,
+            qs: [0; QK_K],
+            bsums: [0; QK_K / 16]
+        };
+        v.len() / QK_K
+    ];
     quantize_q8k(v, &mut out);
     out
 }
@@ -64,11 +77,23 @@ fn neon_q8_bit_equals_scalar() {
         let s = nr_tensor::kernels::dot_q8_scalar(&w, &x);
         let v = unsafe { neon::kernels::dot_q8(&w, &x) };
         assert_eq!(s, v, "blocks={blocks}");
-        let xs4: Vec<_> = (0..4).map(|i| q8(&rng.vec(blocks * QK8_0).iter().map(|f| f * (i + 1) as f32).collect::<Vec<_>>())).collect();
+        let xs4: Vec<_> = (0..4)
+            .map(|i| {
+                q8(&rng
+                    .vec(blocks * QK8_0)
+                    .iter()
+                    .map(|f| f * (i + 1) as f32)
+                    .collect::<Vec<_>>())
+            })
+            .collect();
         let lanes = [&xs4[0][..], &xs4[1][..], &xs4[2][..], &xs4[3][..]];
         let v4 = unsafe { neon::kernels::dot_q8_x4(&w, lanes) };
         for (i, lane) in lanes.iter().enumerate() {
-            assert_eq!(v4[i], nr_tensor::kernels::dot_q8_scalar(&w, lane), "x4 lane {i}");
+            assert_eq!(
+                v4[i],
+                nr_tensor::kernels::dot_q8_scalar(&w, lane),
+                "x4 lane {i}"
+            );
         }
     }
 }
@@ -77,12 +102,18 @@ fn neon_q8_bit_equals_scalar() {
 fn neon_q4k_bit_equals_scalar() {
     let mut rng = Rng(21);
     for blocks in [1usize, 3, 10] {
-        let w: Vec<_> = rng.adversarial(blocks * QK_K).chunks_exact(QK_K).map(quantize_q4k_ref).collect();
+        let w: Vec<_> = rng
+            .adversarial(blocks * QK_K)
+            .chunks_exact(QK_K)
+            .map(quantize_q4k_ref)
+            .collect();
         let x = q8k(&rng.vec(blocks * QK_K));
         let s = kquant::dot_q4k_scalar(&w, &x);
         let v = unsafe { neon::kquant::dot_q4k(&w, &x) };
         assert_eq!(s, v, "blocks={blocks}");
-        let xs4: Vec<_> = (0..4).map(|_| q8k(&rng.adversarial(blocks * QK_K))).collect();
+        let xs4: Vec<_> = (0..4)
+            .map(|_| q8k(&rng.adversarial(blocks * QK_K)))
+            .collect();
         let lanes = [&xs4[0][..], &xs4[1][..], &xs4[2][..], &xs4[3][..]];
         let v4 = unsafe { neon::kquant::dot_q4k_x4(&w, lanes) };
         for (i, lane) in lanes.iter().enumerate() {
@@ -95,12 +126,18 @@ fn neon_q4k_bit_equals_scalar() {
 fn neon_q6k_bit_equals_scalar() {
     let mut rng = Rng(31);
     for blocks in [1usize, 3, 10] {
-        let w: Vec<_> = rng.adversarial(blocks * QK_K).chunks_exact(QK_K).map(quantize_q6k_ref).collect();
+        let w: Vec<_> = rng
+            .adversarial(blocks * QK_K)
+            .chunks_exact(QK_K)
+            .map(quantize_q6k_ref)
+            .collect();
         let x = q8k(&rng.vec(blocks * QK_K));
         let s = kquant::dot_q6k_scalar(&w, &x);
         let v = unsafe { neon::kquant::dot_q6k(&w, &x) };
         assert_eq!(s, v, "blocks={blocks}");
-        let xs4: Vec<_> = (0..4).map(|_| q8k(&rng.adversarial(blocks * QK_K))).collect();
+        let xs4: Vec<_> = (0..4)
+            .map(|_| q8k(&rng.adversarial(blocks * QK_K)))
+            .collect();
         let lanes = [&xs4[0][..], &xs4[1][..], &xs4[2][..], &xs4[3][..]];
         let v4 = unsafe { neon::kquant::dot_q6k_x4(&w, lanes) };
         for (i, lane) in lanes.iter().enumerate() {
@@ -123,8 +160,16 @@ fn neon_sdot_and_baseline_paths_identical() {
             neon::kernels::dot_q8_impl::<false>(&w8, &x8)
         );
     }
-    let w4: Vec<_> = rng.adversarial(blocks * QK_K).chunks_exact(QK_K).map(quantize_q4k_ref).collect();
-    let w6: Vec<_> = rng.adversarial(blocks * QK_K).chunks_exact(QK_K).map(quantize_q6k_ref).collect();
+    let w4: Vec<_> = rng
+        .adversarial(blocks * QK_K)
+        .chunks_exact(QK_K)
+        .map(quantize_q4k_ref)
+        .collect();
+    let w6: Vec<_> = rng
+        .adversarial(blocks * QK_K)
+        .chunks_exact(QK_K)
+        .map(quantize_q6k_ref)
+        .collect();
     let xk = q8k(&rng.vec(blocks * QK_K));
     unsafe {
         assert_eq!(
@@ -155,8 +200,12 @@ fn neon_kquant_saturated_blocks() {
     };
     let mut rng = Rng(41);
     let x = q8k(&rng.adversarial(QK_K));
-    assert_eq!(kquant::dot_q4k_scalar(&[q4], &x), unsafe { neon::kquant::dot_q4k(&[q4], &x) });
-    assert_eq!(kquant::dot_q6k_scalar(&[q6], &x), unsafe { neon::kquant::dot_q6k(&[q6], &x) });
+    assert_eq!(kquant::dot_q4k_scalar(&[q4], &x), unsafe {
+        neon::kquant::dot_q4k(&[q4], &x)
+    });
+    assert_eq!(kquant::dot_q6k_scalar(&[q6], &x), unsafe {
+        neon::kquant::dot_q6k(&[q6], &x)
+    });
 }
 
 /// f16 helpers vectorize the summation, so tolerance (like x86 F16C).
@@ -164,11 +213,22 @@ fn neon_kquant_saturated_blocks() {
 fn neon_f16_matches_scalar_within_tolerance() {
     let mut rng = Rng(51);
     for n in [7usize, 64, 257] {
-        let k: Vec<u16> = rng.vec(n).iter().map(|&v| nr_tensor::f32_to_f16(v)).collect();
+        let k: Vec<u16> = rng
+            .vec(n)
+            .iter()
+            .map(|&v| nr_tensor::f32_to_f16(v))
+            .collect();
         let q = rng.vec(n);
-        let scalar: f32 = k.iter().zip(&q).map(|(&kb, &qv)| nr_tensor::f16_to_f32(kb) * qv).sum();
+        let scalar: f32 = k
+            .iter()
+            .zip(&q)
+            .map(|(&kb, &qv)| nr_tensor::f16_to_f32(kb) * qv)
+            .sum();
         let v = unsafe { neon::kernels::dot_f16(&k, &q) };
-        assert!((scalar - v).abs() <= 1e-4 * scalar.abs().max(1.0), "n={n}: {scalar} vs {v}");
+        assert!(
+            (scalar - v).abs() <= 1e-4 * scalar.abs().max(1.0),
+            "n={n}: {scalar} vs {v}"
+        );
 
         let mut out_s = rng.vec(n);
         let mut out_v = out_s.clone();
@@ -178,7 +238,10 @@ fn neon_f16_matches_scalar_within_tolerance() {
         }
         unsafe { neon::kernels::axpy_f16(&mut out_v, a, &k) };
         for i in 0..n {
-            assert!((out_s[i] - out_v[i]).abs() <= 1e-5 * out_s[i].abs().max(1.0), "elem {i}");
+            assert!(
+                (out_s[i] - out_v[i]).abs() <= 1e-5 * out_s[i].abs().max(1.0),
+                "elem {i}"
+            );
         }
     }
 }

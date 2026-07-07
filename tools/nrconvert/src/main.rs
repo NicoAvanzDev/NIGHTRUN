@@ -11,11 +11,15 @@ use nr_model::format::{self, TensorDtype, TensorKind};
 use crate::gguf::{Gguf, TensorInfo, GGML_F32, GGML_Q4_K, GGML_Q6_K, GGML_Q8_0};
 
 fn kv_u32(g: &Gguf, key: &str) -> u32 {
-    g.kv.get(key).and_then(gguf::Value::as_u32).unwrap_or_else(|| panic!("missing {key}"))
+    g.kv.get(key)
+        .and_then(gguf::Value::as_u32)
+        .unwrap_or_else(|| panic!("missing {key}"))
 }
 
 fn kv_f32(g: &Gguf, key: &str) -> f32 {
-    g.kv.get(key).and_then(gguf::Value::as_f32).unwrap_or_else(|| panic!("missing {key}"))
+    g.kv.get(key)
+        .and_then(gguf::Value::as_f32)
+        .unwrap_or_else(|| panic!("missing {key}"))
 }
 
 /// Human label for the artifact's quantization recipe, from GGUF
@@ -64,10 +68,19 @@ fn arch_verdict(g: &Gguf, arch: &str) -> Result<(), String> {
                 "Unsupported Granite artifact:\n  detected architecture: {arch} (hybrid transformer + state-space)\n  NightRun Granite support targets the conventional dense transformer variant only.\n  Use a dense Granite GGUF (general.architecture == \"granite\"), e.g. ibm-granite/granite-4.1-3b-GGUF."
             ));
         }
-        other => return Err(format!("unsupported architecture {other:?} (supported: llama, qwen3, granite)")),
+        other => {
+            return Err(format!(
+                "unsupported architecture {other:?} (supported: llama, qwen3, granite)"
+            ))
+        }
     }
     // Belt and braces: reject SSM/MoE features even under a supported name.
-    for key in ["ssm_conv_kernel", "ssm_state_size", "expert_count", "expert_used_count"] {
+    for key in [
+        "ssm_conv_kernel",
+        "ssm_state_size",
+        "expert_count",
+        "expert_used_count",
+    ] {
         let k = format!("{arch}.{key}");
         if let Some(v) = g.kv.get(&k) {
             if v.as_u32().unwrap_or(0) != 0 {
@@ -77,7 +90,11 @@ fn arch_verdict(g: &Gguf, arch: &str) -> Result<(), String> {
             }
         }
     }
-    if let Some(t) = g.tensors.iter().find(|t| t.name.contains(".ssm_") || t.name.contains("ffn_gate_exps")) {
+    if let Some(t) = g
+        .tensors
+        .iter()
+        .find(|t| t.name.contains(".ssm_") || t.name.contains("ffn_gate_exps"))
+    {
         return Err(format!(
             "unsupported tensor {:?}: SSM/MoE layers detected (dense transformers only)",
             t.name
@@ -89,8 +106,14 @@ fn arch_verdict(g: &Gguf, arch: &str) -> Result<(), String> {
 /// Dump the per-tensor dtype table of a GGUF without converting.
 fn inspect(input: &str) {
     let g = gguf::parse(input);
-    let arch = g.kv.get("general.architecture").and_then(gguf::Value::as_str).unwrap_or("?");
-    let name = g.kv.get("general.name").and_then(gguf::Value::as_str).unwrap_or("?");
+    let arch =
+        g.kv.get("general.architecture")
+            .and_then(gguf::Value::as_str)
+            .unwrap_or("?");
+    let name =
+        g.kv.get("general.name")
+            .and_then(gguf::Value::as_str)
+            .unwrap_or("?");
     println!("arch={arch} name={name:?} tensors={}", g.tensors.len());
     match arch_verdict(&g, arch) {
         Ok(()) => println!("verdict: conventional dense transformer (supported)"),
@@ -118,7 +141,13 @@ fn inspect(input: &str) {
             println!("  {k} = {v:?}");
         }
     }
-    for key in ["general.file_type", "tokenizer.ggml.pre", "tokenizer.ggml.bos_token_id", "tokenizer.ggml.eos_token_id", "tokenizer.ggml.add_bos_token"] {
+    for key in [
+        "general.file_type",
+        "tokenizer.ggml.pre",
+        "tokenizer.ggml.bos_token_id",
+        "tokenizer.ggml.eos_token_id",
+        "tokenizer.ggml.add_bos_token",
+    ] {
         if let Some(v) = g.kv.get(key) {
             println!("  {key} = {v:?}");
         }
@@ -127,16 +156,24 @@ fn inspect(input: &str) {
     let mut by_role: std::collections::BTreeMap<(String, String), (u32, u64)> = Default::default();
     for t in &g.tensors {
         let role = match t.name.strip_prefix("blk.") {
-            Some(rest) => rest.split_once('.').map(|(_, r)| r.to_string()).unwrap_or(rest.into()),
+            Some(rest) => rest
+                .split_once('.')
+                .map(|(_, r)| r.to_string())
+                .unwrap_or(rest.into()),
             None => t.name.clone(),
         };
-        let e = by_role.entry((role, ggml_dtype_name(t.dtype))).or_insert((0, 0));
+        let e = by_role
+            .entry((role, ggml_dtype_name(t.dtype)))
+            .or_insert((0, 0));
         e.0 += 1;
         e.1 += t.byte_size;
     }
     println!("{:<28} {:>6} {:>5} {:>9}", "role", "dtype", "count", "MB");
     for ((role, dtype), (count, bytes)) in &by_role {
-        println!("{role:<28} {dtype:>6} {count:>5} {:>9.1}", *bytes as f64 / (1024.0 * 1024.0));
+        println!(
+            "{role:<28} {dtype:>6} {count:>5} {:>9.1}",
+            *bytes as f64 / (1024.0 * 1024.0)
+        );
     }
 }
 
@@ -175,11 +212,10 @@ fn main() {
     let rope_theta = kv_f32(&g, &akey("rope.freq_base"));
     let norm_eps = kv_f32(&g, &akey("attention.layer_norm_rms_epsilon"));
     // Qwen3 declares an explicit head size (attention width != hidden dim).
-    let head_dim = g
-        .kv
-        .get(&akey("attention.key_length"))
-        .and_then(gguf::Value::as_u32)
-        .unwrap_or(dim / n_heads);
+    let head_dim =
+        g.kv.get(&akey("attention.key_length"))
+            .and_then(gguf::Value::as_u32)
+            .unwrap_or(dim / n_heads);
     let vocab = g.kv["tokenizer.ggml.tokens"].as_arr().unwrap().len() as u32;
 
     println!("building tokenizer blob ...");
@@ -249,19 +285,26 @@ fn main() {
 
     // Llama-3 rope scaling params (present in HF config; GGUF carries the
     // precomputed rope_freqs tensor instead, which we prefer at runtime).
-    let rope_factor = g.kv.get("llama.rope.scaling.factor").and_then(gguf::Value::as_f32).unwrap_or(0.0);
+    let rope_factor =
+        g.kv.get("llama.rope.scaling.factor")
+            .and_then(gguf::Value::as_f32)
+            .unwrap_or(0.0);
 
     // Granite muP scalars: required semantics for granite (no invented
     // defaults); neutral values for other families. attn_scale 0.0 means
     // "use 1/sqrt(head_dim)" at runtime.
     let (embed_scale, attn_scale, residual_scale, logit_scale) = if arch_id == 3 {
         let req = |key: &str| -> f32 {
-            g.kv
-                .get(&akey(key))
+            g.kv.get(&akey(key))
                 .and_then(gguf::Value::as_f32)
                 .unwrap_or_else(|| panic!("granite artifact missing required scalar {}", akey(key)))
         };
-        let scalars = (req("embedding_scale"), req("attention.scale"), req("residual_scale"), req("logit_scale"));
+        let scalars = (
+            req("embedding_scale"),
+            req("attention.scale"),
+            req("residual_scale"),
+            req("logit_scale"),
+        );
         println!(
             "granite scalars: embed x{} attn x{} residual x{} logits /{}",
             scalars.0, scalars.1, scalars.2, scalars.3
@@ -284,7 +327,8 @@ fn main() {
     let tok_off = format::HEADER_SIZE as u64;
     let table_off = tok_off + tok.blob.len() as u64;
     let table_size = out.len() as u64 * format::ENTRY_SIZE as u64;
-    let data_off = (table_off + table_size).div_ceil(format::DATA_ALIGN as u64) * format::DATA_ALIGN as u64;
+    let data_off =
+        (table_off + table_size).div_ceil(format::DATA_ALIGN as u64) * format::DATA_ALIGN as u64;
 
     // Serialize the tensor table.
     let mut table = Vec::with_capacity(table_size as usize);
@@ -300,7 +344,10 @@ fn main() {
     }
 
     // Data CRC.
-    println!("checksumming tensor data ({} MB) ...", data_size / (1024 * 1024));
+    println!(
+        "checksumming tensor data ({} MB) ...",
+        data_size / (1024 * 1024)
+    );
     let mut dcrc = Crc32::new();
     {
         let mut pos = 0u64;
@@ -326,7 +373,9 @@ fn main() {
     header.extend_from_slice(&format::MAGIC);
     header.extend_from_slice(&format::VERSION.to_le_bytes());
     header.extend_from_slice(&arch_id.to_le_bytes());
-    for v in [dim, n_layers, n_heads, n_kv_heads, head_dim, ffn_dim, vocab, ctx_train] {
+    for v in [
+        dim, n_layers, n_heads, n_kv_heads, head_dim, ffn_dim, vocab, ctx_train,
+    ] {
         header.extend_from_slice(&v.to_le_bytes());
     }
     for v in [rope_theta, norm_eps, rope_factor, 0.0, 0.0, 0.0] {
@@ -336,11 +385,10 @@ fn main() {
     for v in [embed_scale, attn_scale, residual_scale, logit_scale] {
         header.extend_from_slice(&v.to_bits().to_le_bytes());
     }
-    let base_name = g
-        .kv
-        .get("general.name")
-        .and_then(gguf::Value::as_str)
-        .unwrap_or("Unknown Model");
+    let base_name =
+        g.kv.get("general.name")
+            .and_then(gguf::Value::as_str)
+            .unwrap_or("Unknown Model");
     let name = format!("{base_name} {}", quant_label(&g));
     let mut name_bytes = [0u8; format::NAME_LEN];
     let n = name.len().min(format::NAME_LEN);

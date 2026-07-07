@@ -42,9 +42,9 @@ pub struct Tokenizer<'a> {
     pub specials: Specials,
     pub template: Template,
     vocab_count: u32,
-    byte_ids: &'a [u8],   // 256 * u32
-    table: &'a [u8],      // vocab_count * 8
-    merges: &'a [u8],     // merge_count * 16
+    byte_ids: &'a [u8], // 256 * u32
+    table: &'a [u8],    // vocab_count * 8
+    merges: &'a [u8],   // merge_count * 16
     merge_count: usize,
     pool: &'a [u8],
 }
@@ -88,13 +88,54 @@ impl<'a> Tokenizer<'a> {
             end_header: u32le(blob, 40),
             end_of_text: u32le(blob, 44),
         };
-        let byte_ids_off = 48;
+        let byte_ids_off = 48usize;
         let table_off = byte_ids_off + 256 * 4;
-        let merges_off = table_off + vocab_count as usize * 8;
-        let pool_off = merges_off + merge_count * 16;
-        if blob.len() < pool_off + pool_size {
+        // All section sizes are u32-derived, so these sums cannot wrap on
+        // the 64-bit targets NightRun supports; still compute checked so
+        // the invariant is explicit rather than environmental.
+        let merges_off = table_off
+            .checked_add(
+                (vocab_count as usize)
+                    .checked_mul(8)
+                    .ok_or(Error::TooShort)?,
+            )
+            .ok_or(Error::TooShort)?;
+        let pool_off = merges_off
+            .checked_add(merge_count.checked_mul(16).ok_or(Error::TooShort)?)
+            .ok_or(Error::TooShort)?;
+        let pool_end = pool_off.checked_add(pool_size).ok_or(Error::TooShort)?;
+        if blob.len() < pool_end {
             return Err(Error::TooShort);
         }
+
+        // Validate the whole vocab table up front: every token's pool
+        // range must lie inside the pool. Without this, a malformed blob
+        // panics at first use (token_bytes slice) instead of failing here.
+        let table = &blob[table_off..merges_off];
+        for id in 0..vocab_count as usize {
+            let off = id * 8;
+            let p = u32le(table, off) as usize;
+            let len = u16::from_le_bytes(table[off + 4..off + 6].try_into().unwrap()) as usize;
+            if p + len > pool_size {
+                return Err(Error::TooShort);
+            }
+        }
+        // Special-token ids must be real vocab entries — they are fed
+        // straight into the model as token ids.
+        let specials_ok = [
+            specials.bos,
+            specials.eos,
+            specials.eot,
+            specials.start_header,
+            specials.end_header,
+            specials.end_of_text,
+        ]
+        .iter()
+        .all(|&t| t < vocab_count);
+        if !specials_ok {
+            return Err(Error::TooShort);
+        }
+
         Ok(Tokenizer {
             specials,
             template,

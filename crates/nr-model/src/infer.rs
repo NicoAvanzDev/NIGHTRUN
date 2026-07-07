@@ -143,7 +143,10 @@ impl Acts {
                 let bpr = cols / QK8_0;
                 let xq = &mut self.q8[..batch * bpr];
                 for b in 0..batch {
-                    q8::quantize(&xs[b * cols..(b + 1) * cols], &mut xq[b * bpr..(b + 1) * bpr]);
+                    q8::quantize(
+                        &xs[b * cols..(b + 1) * cols],
+                        &mut xq[b * bpr..(b + 1) * bpr],
+                    );
                 }
                 matmul_q8(y, blocks, xq, rows, cols, batch);
             }
@@ -151,7 +154,10 @@ impl Acts {
                 let bpr = cols / QK_K;
                 let xk = &mut self.q8k[..batch * bpr];
                 for b in 0..batch {
-                    kquant::quantize_q8k(&xs[b * cols..(b + 1) * cols], &mut xk[b * bpr..(b + 1) * bpr]);
+                    kquant::quantize_q8k(
+                        &xs[b * cols..(b + 1) * cols],
+                        &mut xk[b * bpr..(b + 1) * bpr],
+                    );
                 }
                 kquant::matmul_q4k(y, blocks, xk, rows, cols, batch);
             }
@@ -159,7 +165,10 @@ impl Acts {
                 let bpr = cols / QK_K;
                 let xk = &mut self.q8k[..batch * bpr];
                 for b in 0..batch {
-                    kquant::quantize_q8k(&xs[b * cols..(b + 1) * cols], &mut xk[b * bpr..(b + 1) * bpr]);
+                    kquant::quantize_q8k(
+                        &xs[b * cols..(b + 1) * cols],
+                        &mut xk[b * bpr..(b + 1) * bpr],
+                    );
                 }
                 kquant::matmul_q6k(y, blocks, xk, rows, cols, batch);
             }
@@ -325,8 +334,13 @@ impl<'m> InferCtx<'m> {
     pub fn required_bytes(model: &Model, ctx: usize) -> usize {
         let d = dims_of(model, ctx);
         let maxd = d.dim.max(d.att_dim).max(d.ffn_dim);
-        let f32s = d.dim * 3 + d.att_dim * 2 + d.kv_dim * 2 + d.n_heads * ctx
-            + d.ffn_dim * 2 + d.vocab + d.head_dim / 2;
+        let f32s = d.dim * 3
+            + d.att_dim * 2
+            + d.kv_dim * 2
+            + d.n_heads * ctx
+            + d.ffn_dim * 2
+            + d.vocab
+            + d.head_dim / 2;
         let batch_f32s = MAX_BATCH * (d.dim * 2 + d.att_dim * 2 + d.kv_dim * 2 + d.ffn_dim * 2);
         let acts = MAX_BATCH
             * (maxd / QK8_0 * core::mem::size_of::<BlockQ8_0>()
@@ -335,20 +349,29 @@ impl<'m> InferCtx<'m> {
         (f32s + batch_f32s) * 4 + acts + kv + 64 * 40 // alignment slack
     }
 
-    pub fn new(model: &'m Model<'m>, ctx: usize, alloc: AllocFn) -> Result<InferCtx<'m>, ParseError> {
+    pub fn new(
+        model: &'m Model<'m>,
+        ctx: usize,
+        alloc: AllocFn,
+    ) -> Result<InferCtx<'m>, ParseError> {
         let m = &model.meta;
         let dims = dims_of(model, ctx);
 
         // Shape-checked tensor accessors.
-        let f32_tensor = |kind: TensorKind, layer: usize, len: usize| -> Result<&'m [f32], ParseError> {
-            let v = model.tensor(kind, layer)?;
-            let s = v.f32();
-            if s.len() != len {
-                return Err(ParseError::MissingTensor("bad f32 tensor shape"));
-            }
-            Ok(s)
-        };
-        let mat = |kind: TensorKind, layer: usize, rows: usize, cols: usize| -> Result<QMat<'m>, ParseError> {
+        let f32_tensor =
+            |kind: TensorKind, layer: usize, len: usize| -> Result<&'m [f32], ParseError> {
+                let v = model.tensor(kind, layer)?;
+                let s = v.f32();
+                if s.len() != len {
+                    return Err(ParseError::MissingTensor("bad f32 tensor shape"));
+                }
+                Ok(s)
+            };
+        let mat = |kind: TensorKind,
+                   layer: usize,
+                   rows: usize,
+                   cols: usize|
+         -> Result<QMat<'m>, ParseError> {
             let v = model.tensor(kind, layer)?;
             if v.rows != rows || v.cols != cols {
                 return Err(ParseError::MissingTensor("bad matrix shape"));
@@ -360,7 +383,9 @@ impl<'m> InferCtx<'m> {
         let is_qwen = m.arch == Arch::Qwen3;
         // Non-Qwen families must not carry qk-norm tensors.
         if !is_qwen && model.has_tensor(TensorKind::AttnQNorm) {
-            return Err(ParseError::MissingTensor("unexpected attn_q_norm for this arch"));
+            return Err(ParseError::MissingTensor(
+                "unexpected attn_q_norm for this arch",
+            ));
         }
         let mut layers = alloc::vec::Vec::with_capacity(dims.n_layers);
         for l in 0..dims.n_layers {
@@ -392,7 +417,12 @@ impl<'m> InferCtx<'m> {
         } else {
             mat(TensorKind::Output, 0, dims.vocab, dims.dim)?
         };
-        let weights = Weights { embed, layers, out_norm, output };
+        let weights = Weights {
+            embed,
+            layers,
+            out_norm,
+            output,
+        };
 
         // Rope frequencies: base theta spectrum, then either the GGUF's
         // precomputed frequency factors (divisors) or the header's Llama-3
@@ -483,7 +513,9 @@ impl<'m> InferCtx<'m> {
         assert!(pos < d.ctx, "context window exhausted");
 
         // Token embedding (dequantized row), muP embedding scale applied.
-        self.weights.embed.dequant_row(token as usize, d.dim, self.x);
+        self.weights
+            .embed
+            .dequant_row(token as usize, d.dim, self.x);
         if self.embed_scale != 1.0 {
             tvec::scale_inplace(self.x, self.embed_scale);
         }
@@ -544,7 +576,8 @@ impl<'m> InferCtx<'m> {
 
             // MLP block (SwiGLU).
             tvec::rmsnorm(self.xb, self.x, w.ffn_norm, self.norm_eps);
-            self.acts.matvec_group(&mut [(self.gate, w.w_gate), (self.up, w.w_up)], self.xb);
+            self.acts
+                .matvec_group(&mut [(self.gate, w.w_gate), (self.up, w.w_up)], self.xb);
             tvec::swiglu(self.gate, self.up);
             self.acts.matvec(self.xb2, w.w_down, self.gate);
             tvec::saxpy(self.x, self.residual_scale, self.xb2);
@@ -564,10 +597,11 @@ impl<'m> InferCtx<'m> {
     /// Batched prefill of up to MAX_BATCH prompt tokens. Numerically
     /// bit-identical to calling `forward` per token (same kernels, same
     /// order); returns the logits of the last token.
+    #[allow(clippy::needless_range_loop)] // j writes two caches at one offset
     pub fn prefill_chunk(&mut self, tokens: &[u32]) -> &[f32] {
         let d = self.dims;
         let b = tokens.len();
-        assert!(b >= 1 && b <= MAX_BATCH);
+        assert!((1..=MAX_BATCH).contains(&b));
         assert!(self.pos + b <= d.ctx, "context window exhausted");
         let base = self.pos;
 
@@ -620,8 +654,7 @@ impl<'m> InferCtx<'m> {
                 let cache_row = (l * d.ctx + pos) * d.kv_dim;
                 for j in 0..d.kv_dim {
                     self.key_cache[cache_row + j] = f32_to_f16(k[j]);
-                    self.val_cache[cache_row + j] =
-                        f32_to_f16(self.bv[i * d.kv_dim + j]);
+                    self.val_cache[cache_row + j] = f32_to_f16(self.bv[i * d.kv_dim + j]);
                 }
             }
 
@@ -632,8 +665,8 @@ impl<'m> InferCtx<'m> {
             for i in 0..b {
                 let pos = base + i;
                 for h in 0..d.n_heads {
-                    let qh = &self.bq[i * d.att_dim + h * d.head_dim
-                        ..i * d.att_dim + (h + 1) * d.head_dim];
+                    let qh = &self.bq
+                        [i * d.att_dim + h * d.head_dim..i * d.att_dim + (h + 1) * d.head_dim];
                     let kvh = (h / gqa) * d.head_dim;
                     let att = &mut self.att[h * d.ctx..h * d.ctx + pos + 1];
                     for (t, a) in att.iter_mut().enumerate() {
@@ -641,8 +674,8 @@ impl<'m> InferCtx<'m> {
                         *a = dot_f16(&self.key_cache[krow..krow + d.head_dim], qh) * scale;
                     }
                     tvec::softmax(att);
-                    let out = &mut self.battn[i * d.att_dim + h * d.head_dim
-                        ..i * d.att_dim + (h + 1) * d.head_dim];
+                    let out = &mut self.battn
+                        [i * d.att_dim + h * d.head_dim..i * d.att_dim + (h + 1) * d.head_dim];
                     out.fill(0.0);
                     for (t, &a) in att.iter().enumerate() {
                         let vrow = (l * d.ctx + t) * d.kv_dim + kvh;

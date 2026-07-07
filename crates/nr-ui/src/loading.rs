@@ -38,9 +38,37 @@ pub fn draw(surf: &mut Surface, fonts: &Fonts, st: &LoadState) {
     // Title.
     let title = "NIGHTRUN // SYSTEM BOOT";
     let tw = draw::text_width(&fonts.head, title, 1, 2);
-    draw::text_glow(surf, &fonts.head, px + (pw - tw) / 2, py + 22, title, 1, 2, 0, theme::NEON_MAGENTA, 2);
-    draw::text(surf, &fonts.head, px + (pw - tw) / 2, py + 22, title, theme::TEXT_PRIMARY, 1, 2);
-    draw::line(surf, px + 24, py + 66, px + pw - 24, py + 66, theme::BORDER, 255);
+    draw::text_glow(
+        surf,
+        &fonts.head,
+        px + (pw - tw) / 2,
+        py + 22,
+        title,
+        1,
+        2,
+        0,
+        theme::NEON_MAGENTA,
+        2,
+    );
+    draw::text(
+        surf,
+        &fonts.head,
+        px + (pw - tw) / 2,
+        py + 22,
+        title,
+        theme::TEXT_PRIMARY,
+        1,
+        2,
+    );
+    draw::line(
+        surf,
+        px + 24,
+        py + 66,
+        px + pw - 24,
+        py + 66,
+        theme::BORDER,
+        255,
+    );
 
     // Stage checklist.
     let font = &fonts.body;
@@ -61,7 +89,16 @@ pub fn draw(surf: &mut Surface, fonts: &Fonts, st: &LoadState) {
             core::cmp::Ordering::Greater => ("[    ]", theme::BORDER, theme::TEXT_DIM),
         };
         draw::text(surf, font, px + 36, y, marker, mcol, 1, 0);
-        draw::text(surf, font, px + 36 + draw::text_width(font, "[ OK ] ", 1, 0), y, stage, tcol, 1, 0);
+        draw::text(
+            surf,
+            font,
+            px + 36 + draw::text_width(font, "[ OK ] ", 1, 0),
+            y,
+            stage,
+            tcol,
+            1,
+            0,
+        );
         y += font.height as i32 + 10;
     }
 
@@ -80,8 +117,26 @@ pub fn draw(surf: &mut Surface, fonts: &Fonts, st: &LoadState) {
     // Percent + detail.
     let mut pct_buf = [0u8; 8];
     let pct = format_pct(overall, &mut pct_buf);
-    draw::text(surf, &fonts.body, bx + bw + 8 - draw::text_width(&fonts.body, pct, 1, 0), by - fonts.body.height as i32 - 6, pct, theme::NEON_CYAN, 1, 0);
-    draw::text(surf, &fonts.small, bx, by + bh + 12, st.detail, theme::TEXT_DIM, 1, 0);
+    draw::text(
+        surf,
+        &fonts.body,
+        bx + bw + 8 - draw::text_width(&fonts.body, pct, 1, 0),
+        by - fonts.body.height as i32 - 6,
+        pct,
+        theme::NEON_CYAN,
+        1,
+        0,
+    );
+    draw::text(
+        surf,
+        &fonts.small,
+        bx,
+        by + bh + 12,
+        st.detail,
+        theme::TEXT_DIM,
+        1,
+        0,
+    );
 
     draw::scanlines(surf, 36);
 }
@@ -101,8 +156,20 @@ fn panel(surf: &mut Surface, x: i32, y: i32, w: i32, h: i32) {
         (x, y + h - 1, 1, -1),
         (x + w - 1, y + h - 1, -1, -1),
     ] {
-        surf.fill_rect(if dx > 0 { cx } else { cx - l + 1 }, cy, l, 2 * dy.max(0) + 1, theme::NEON_CYAN);
-        surf.fill_rect(cx, if dy > 0 { cy } else { cy - l + 1 }, 2 * dx.max(0) + 1, l, theme::NEON_CYAN);
+        surf.fill_rect(
+            if dx > 0 { cx } else { cx - l + 1 },
+            cy,
+            l,
+            2 * dy.max(0) + 1,
+            theme::NEON_CYAN,
+        );
+        surf.fill_rect(
+            cx,
+            if dy > 0 { cy } else { cy - l + 1 },
+            2 * dx.max(0) + 1,
+            l,
+            theme::NEON_CYAN,
+        );
     }
 }
 
@@ -116,13 +183,24 @@ fn bar(surf: &mut Surface, x: i32, y: i32, w: i32, h: i32, pm: u32, frame: u32) 
     for col in 0..fill {
         let c = color::gradient(BAR_STOPS, (col as u32) * 1000 / w.max(1) as u32);
         let hl = (col as u32 + frame * 6) % 160;
-        let c = if hl < 22 { color::lerp(c, 0xffffff, 90) } else { c };
+        let c = if hl < 22 {
+            color::lerp(c, 0xffffff, 90)
+        } else {
+            c
+        };
         surf.fill_rect(x + col, y + 2, 1, h - 4, c);
     }
     // Glow under the fill edge.
     if fill > 2 {
         for g in 1..=4 {
-            surf.blend_rect(x + fill, y + 2, g, h - 4, theme::NEON_ORANGE, (40 / g) as u32);
+            surf.blend_rect(
+                x + fill,
+                y + 2,
+                g,
+                h - 4,
+                theme::NEON_ORANGE,
+                (40 / g) as u32,
+            );
         }
     }
 }

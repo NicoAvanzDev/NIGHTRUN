@@ -110,12 +110,15 @@ pub fn matmul_q8(
             while fast && b + 4 <= batch {
                 let vs = unsafe {
                     // SAFETY: fast_path() verified the backend's features.
-                    simd::dot_q8_x4(row, [
-                        &xs[b * bpr..(b + 1) * bpr],
-                        &xs[(b + 1) * bpr..(b + 2) * bpr],
-                        &xs[(b + 2) * bpr..(b + 3) * bpr],
-                        &xs[(b + 3) * bpr..(b + 4) * bpr],
-                    ])
+                    simd::dot_q8_x4(
+                        row,
+                        [
+                            &xs[b * bpr..(b + 1) * bpr],
+                            &xs[(b + 1) * bpr..(b + 2) * bpr],
+                            &xs[(b + 2) * bpr..(b + 3) * bpr],
+                            &xs[(b + 3) * bpr..(b + 4) * bpr],
+                        ],
+                    )
                 };
                 for (i, v) in vs.into_iter().enumerate() {
                     // SAFETY: rows disjoint per worker; each (b, r) once.
@@ -165,6 +168,9 @@ pub fn axpy_f16(out: &mut [f32], a: f32, v: &[u16]) {
     }
 }
 
+/// # Safety
+/// Caller must ensure AVX2+FMA+F16C are supported and YMM state is
+/// enabled (see [`cpu::fast_f16`]).
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma,f16c")]
 pub unsafe fn dot_f16_f16c(k: &[u16], q: &[f32]) -> f32 {
@@ -192,6 +198,9 @@ pub unsafe fn dot_f16_f16c(k: &[u16], q: &[f32]) -> f32 {
     sum
 }
 
+/// # Safety
+/// Caller must ensure AVX2+FMA+F16C are supported and YMM state is
+/// enabled (see [`cpu::fast_f16`]).
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma,f16c")]
 pub unsafe fn axpy_f16_f16c(out: &mut [f32], a: f32, v: &[u16]) {

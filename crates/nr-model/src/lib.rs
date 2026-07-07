@@ -10,9 +10,9 @@ extern crate alloc;
 
 pub mod crc32;
 pub mod format;
-pub mod verify;
 pub mod infer;
 pub mod sample;
+pub mod verify;
 
 pub use format::{Meta, Model, TensorDtype, TensorKind, TensorView};
 pub use infer::InferCtx;

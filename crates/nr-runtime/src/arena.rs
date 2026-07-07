@@ -19,7 +19,11 @@ impl Arena {
     /// `base..base+size` must be exclusively owned, writable memory that
     /// outlives the arena.
     pub unsafe fn new(base: *mut u8, size: usize) -> Arena {
-        Arena { base, size, offset: 0 }
+        Arena {
+            base,
+            size,
+            offset: 0,
+        }
     }
 
     pub fn capacity(&self) -> usize {
@@ -48,7 +52,10 @@ impl Arena {
         bytes.fill(0);
         // SAFETY: correctly sized, aligned, zero is a valid T (T: Copy plain data).
         unsafe {
-            Some(core::slice::from_raw_parts_mut(bytes.as_mut_ptr() as *mut T, n))
+            Some(core::slice::from_raw_parts_mut(
+                bytes.as_mut_ptr() as *mut T,
+                n,
+            ))
         }
     }
 }
