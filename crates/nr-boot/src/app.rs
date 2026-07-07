@@ -24,9 +24,12 @@ fn stall_us(us: u64) {
     boot::stall(Duration::from_micros(us));
 }
 
+/// CPU architecture as spoken text (platform crate, so cfg is fine here).
+const ARCH_NAME: &str = if cfg!(target_arch = "aarch64") { "ARM64" } else { "x86_64" };
+
 fn system_prompt(model_name: &str) -> String {
     alloc::format!(
-        "You are NightRun, a helpful assistant running {model_name} fully offline on bare-metal x86_64 hardware - no operating system underneath. Be concise and friendly."
+        "You are NightRun, a helpful assistant running {model_name} fully offline on bare-metal {ARCH_NAME} hardware - no operating system underneath. Be concise and friendly."
     )
 }
 

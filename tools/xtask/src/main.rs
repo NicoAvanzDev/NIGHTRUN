@@ -306,7 +306,10 @@ fn run(opts: RunOpts) {
                 .args(["-smp", opts.smp.as_deref().unwrap_or("4")])
                 .args(["-drive", &format!("if=pflash,format=raw,readonly=on,file=/usr/share/AAVMF/AAVMF_CODE.fd")])
                 .args(["-drive", &format!("if=pflash,format=raw,file={}", vars.display())])
-                .args(["-device", "virtio-gpu-pci"])
+                // ramfb: plain linear framebuffer through AAVMF's GOP
+                // (virtio-gpu is Blt-only, which NightRun's direct-write
+                // renderer rejects; the Pi's real GOP is linear).
+                .args(["-device", "ramfb"])
                 .args(["-device", "qemu-xhci", "-device", "usb-kbd"])
                 .args(["-drive", &format!("if=none,id=boot,{boot_drive}")])
                 .args(["-device", "virtio-blk-pci,drive=boot"]);
