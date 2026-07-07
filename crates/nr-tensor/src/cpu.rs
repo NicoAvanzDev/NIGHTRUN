@@ -105,24 +105,19 @@ mod imp {
         Features { dotprod: bits & F_A != 0, fp16: bits & F_B != 0 }
     }
 
-    /// NEON is baseline on aarch64; the fast path exists once the NEON
-    /// kernels land (R3). Until then this returns false so all dots take
-    /// the portable scalar route.
+    /// NEON is architecturally baseline on aarch64 (and the UEFI target
+    /// is hard-float): the NEON kernels are always usable.
     pub fn fast_path() -> bool {
-        false // flipped on when the NEON kernels are implemented
+        true
     }
 
-    /// f16<->f32 conversion instructions are ARMv8.0 baseline.
+    /// f16<->f32 conversion instructions (FCVTL) are ARMv8.0 baseline.
     pub fn fast_f16() -> bool {
-        fast_path()
+        true
     }
 
     pub fn simd_label() -> &'static str {
-        if fast_path() {
-            if features().dotprod { "NEON+DOTPROD kernels" } else { "NEON kernels" }
-        } else {
-            "scalar kernels"
-        }
+        "NEON kernels"
     }
 
     pub(super) fn probe() -> u8 {

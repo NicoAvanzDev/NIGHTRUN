@@ -152,6 +152,7 @@ fn q4k_dot_matches_dequant_reference() {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 #[test]
 fn avx2_matches_scalar_q4k() {
     assert!(nr_tensor::cpu::fast_path(), "test host must have AVX2+FMA");
@@ -168,6 +169,7 @@ fn avx2_matches_scalar_q4k() {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 #[test]
 fn avx2_matches_scalar_q6k() {
     assert!(nr_tensor::cpu::fast_path(), "test host must have AVX2+FMA");
@@ -185,6 +187,7 @@ fn avx2_matches_scalar_q6k() {
 }
 
 /// Saturated metadata: max 6-bit scales/mins, extreme quants.
+#[cfg(target_arch = "x86_64")]
 #[test]
 fn avx2_matches_scalar_saturated_blocks() {
     assert!(nr_tensor::cpu::fast_path());
