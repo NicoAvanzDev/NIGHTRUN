@@ -36,7 +36,19 @@ git submodule update --init --recursive --jobs 4
 echo "== building TF-A + EDK2 (RELEASE, rpi5) at $PIN"
 ./build.sh --model 5
 
+# Device tree blobs: the Pi 5 bootloader refuses to start any armstub
+# (incl. UEFI) without a matching DTB on the FAT partition — hard
+# real-hardware finding. Sourced from the official raspberrypi/firmware
+# repo at a pinned commit.
+DTB_PIN=958bfb0a9d14a4e5c29ed72124c0797788503c5a
+DTB_RAW=https://raw.githubusercontent.com/raspberrypi/firmware/$DTB_PIN/boot
+mkdir -p dtb/overlays
+for f in bcm2712-rpi-5-b.dtb bcm2712d0-rpi-5-b.dtb bcm2712-d-rpi-5-b.dtb; do
+    curl -sfLo "dtb/$f" "$DTB_RAW/$f"
+done
+curl -sfLo dtb/overlays/bcm2712d0.dtbo "$DTB_RAW/overlays/bcm2712d0.dtbo"
+
 echo
 echo "== firmware payload:"
-sha256sum RPI_EFI.fd config.txt
+sha256sum RPI_EFI.fd config.txt dtb/*.dtb dtb/overlays/*.dtbo
 echo "RPI_EFI.fd ready in $DIR — now: cargo xtask pi-image [--model models/<file>.nrm]"

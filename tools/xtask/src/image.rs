@@ -182,6 +182,20 @@ pub fn build_pi(img_path: &Path, efi: &Path, model: Option<&Path>, firmware_dir:
         let root = fs.root_dir();
         copy_into(&root, "RPI_EFI.fd", &fw_fd);
         copy_into(&root, "config.txt", &fw_cfg);
+        // The bootloader requires a board-matching DTB before it will
+        // start the armstub; ship all Pi 5 variants + the D0 overlay.
+        let dtb_dir = firmware_dir.join("dtb");
+        assert!(
+            dtb_dir.join("bcm2712d0-rpi-5-b.dtb").exists(),
+            "DTBs missing - rerun scripts/build-rpi5-firmware.sh"
+        );
+        for entry in std::fs::read_dir(&dtb_dir).unwrap().flatten() {
+            if entry.path().extension().is_some_and(|e| e == "dtb") {
+                copy_into(&root, entry.file_name().to_str().unwrap(), &entry.path());
+            }
+        }
+        let overlays = root.create_dir("overlays").unwrap();
+        copy_into(&overlays, "bcm2712d0.dtbo", &dtb_dir.join("overlays/bcm2712d0.dtbo"));
         let boot = root.create_dir("EFI").unwrap().create_dir("BOOT").unwrap();
         copy_into(&boot, "BOOTAA64.EFI", efi);
         if let Some(model) = model {

@@ -109,13 +109,20 @@ Stage gates; record each result (and the UART transcript) here. Serial:
    or later (update with `-a` if older, then note the version here).
 2. **Flash**: `sudo dd if=nightrun-pi5.img of=/dev/sdX bs=4M oflag=direct status=progress && sync`.
 3. **Firmware boots**: QR screen → Pi logo + progress bar (fork firmware
-   alive). If black screen: EEPROM too old, or D0/C1 mismatch. If the
-   bootloader complains "installed OS does not indicate support for
-   Raspberry Pi 5": `os_check=0` is missing from config.txt — our
-   repo-owned `assets/pi5/config.txt` includes it (hit on the real D0
-   board 2026-07-07; newer EEPROMs apply an OS-support check that UEFI
-   armstubs can't satisfy). Never hand-edit files on the card; rebuild
-   with `cargo xtask pi-image` and re-flash.
+   alive). Real-hardware findings from the D0 bring-up (2026-07-07),
+   each producing a black screen or bootloader stop:
+   - "installed OS does not indicate support for Raspberry Pi 5" →
+     `os_check=0` missing (newer EEPROMs apply an OS-support check UEFI
+     armstubs can't satisfy). Our `assets/pi5/config.txt` includes it.
+   - Bootloader probes `kernel_2712.img`/`kernel8.img` then dies →
+     **DTBs missing**: the Pi 5 bootloader refuses to start any armstub
+     without a board-matching `bcm2712*.dtb` on the FAT root. pi-image
+     ships all Pi 5 variants + `overlays/bcm2712d0.dtbo` (pinned from
+     raspberrypi/firmware @ 958bfb0a).
+   - Diagnosis tool: press Esc during the bootloader phase — its HDMI
+     log shows config parsing and every fs_open attempt.
+   Never hand-edit files on the card; rebuild with `cargo xtask
+   pi-image` and re-flash.
 4. **NightRun boots**: `[nightrun] vX.Y.Z boot layer up` on UART;
    `[cpu] aarch64 neon baseline; dotprod=true fp16=true` expected on A76.
 5. **GOP**: synthwave splash on HDMI; note the mode
