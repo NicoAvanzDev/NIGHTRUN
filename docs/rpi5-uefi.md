@@ -97,6 +97,10 @@ when bring-up succeeds.
   (between the HDMI ports, JST-SH 1.0 mm), *not* GPIO 14/15. 115200 8n1.
 - Power: 5 V/3 A minimum, official 25 W supply recommended; active
   cooling required for sustained inference (the SoC throttles at 85 °C).
+- Fan header: OS-managed on Pi 5 — off under UEFI until NightRun's RP1
+  driver forces it to 100% (nr-boot/src/fan.rs; verified working on the
+  D0 board 2026-07-07). No thermal curve: when you can't regulate,
+  overcool.
 - `/bye` (UEFI shutdown) goes through PSCI; behavior on real hardware
   (power-off vs reboot) to be observed at bring-up and recorded here.
 
