@@ -25,9 +25,10 @@ fn main() -> Status {
     serial::init();
     serial_println!("[nightrun] v{} boot layer up", VERSION);
     uefi::helpers::init().expect("uefi helpers");
+    serial::attach();
     // The firmware watchdog would reset the machine mid-chat; disable it.
     let _ = uefi::boot::set_watchdog_timer(0, 0x1_0000, None);
-    enable_avx();
+    enable_simd();
 
     let display = video::init();
     install_panic_fb(&display);
@@ -36,10 +37,10 @@ fn main() -> Status {
     Status::SUCCESS
 }
 
-/// Enable AVX (YMM state) via XCR0 so the AVX2/FMA/F16C kernels can run.
-/// UEFI guarantees SSE only; we do the OSXSAVE dance ourselves.
-fn enable_avx() {
-    if !enable_avx_quiet() {
+/// Enable the SIMD state the kernels need and log what the CPU offers.
+#[cfg(target_arch = "x86_64")]
+fn enable_simd() {
+    if !enable_simd_quiet() {
         serial_println!("[cpu] no AVX - scalar kernels");
         return;
     }
@@ -47,9 +48,25 @@ fn enable_avx() {
     serial_println!("[cpu] avx enabled; avx2={} fma={} f16c={}", f.avx2, f.fma, f.f16c);
 }
 
-/// AVX enable without serial output (also used by AP worker bring-up,
-/// where two cores sharing the serial port would interleave garbage).
-pub fn enable_avx_quiet() -> bool {
+/// NEON is architecturally baseline on aarch64 UEFI (hard-float target);
+/// nothing to enable, just log the probed optional features.
+#[cfg(target_arch = "aarch64")]
+fn enable_simd() {
+    enable_simd_quiet();
+    let f = nr_tensor::cpu::features();
+    serial_println!("[cpu] aarch64 neon baseline; dotprod={} fp16={}", f.dotprod, f.fp16);
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn enable_simd_quiet() -> bool {
+    true
+}
+
+/// AVX (YMM state) enable via CR4.OSXSAVE + XCR0 — UEFI guarantees SSE
+/// only. Quiet variant is also used by AP worker bring-up, where two
+/// cores sharing the serial port would interleave garbage.
+#[cfg(target_arch = "x86_64")]
+pub fn enable_simd_quiet() -> bool {
     use core::arch::x86_64::__cpuid;
     let leaf1 = __cpuid(1);
     let xsave = leaf1.ecx & (1 << 26) != 0;
@@ -116,8 +133,23 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     }
 
     loop {
-        unsafe { core::arch::asm!("hlt") };
+        halt();
     }
+}
+
+/// Park the CPU (x86 hlt / aarch64 wfi).
+#[inline]
+pub fn halt() {
+    #[cfg(target_arch = "x86_64")]
+    // SAFETY: privileged halt; we run at the firmware's privilege level.
+    unsafe {
+        core::arch::asm!("hlt")
+    };
+    #[cfg(target_arch = "aarch64")]
+    // SAFETY: wfi is always safe to execute.
+    unsafe {
+        core::arch::asm!("wfi")
+    };
 }
 
 fn draw_panic_screen(fb: &nr_gfx::direct::DirectFb, msg: &str) {

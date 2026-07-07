@@ -21,11 +21,11 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("build") => {
-            build_and_stage();
+            build_and_stage(arch_flag(&args));
         }
         Some("image") => {
             let model = args.iter().position(|a| a == "--model").map(|i| args[i + 1].clone());
-            build_image(true, model.as_deref());
+            build_image(true, model.as_deref(), arch_flag(&args));
         }
         Some("run") => run(parse_run_opts(&args[1..])),
         Some("bench") => bench(),
@@ -84,10 +84,13 @@ fn bench() {
 /// Build nightrun.img with the given model (default models/model.nrm).
 /// When `fresh` is false and the image already contains this exact model,
 /// only BOOTX64.EFI is refreshed.
-fn build_image(fresh: bool, model_arg: Option<&str>) -> PathBuf {
+fn build_image(fresh: bool, model_arg: Option<&str>, arch: Arch) -> PathBuf {
     let root = root();
-    let (_, efi) = build_and_stage();
-    let img = root.join("nightrun.img");
+    let (_, efi) = build_and_stage(arch);
+    let img = root.join(match arch {
+        Arch::X86 => "nightrun.img",
+        Arch::Aarch64 => "nightrun-aarch64.img",
+    });
     let model = root.join(model_arg.unwrap_or("models/model.nrm"));
     let model = model.exists().then_some(model);
     if model.is_none() {
@@ -96,7 +99,10 @@ fn build_image(fresh: bool, model_arg: Option<&str>) -> PathBuf {
 
     // Sidecar records which model the image holds, so switching models
     // forces a full rebuild instead of a stale EFI-only update.
-    let sidecar = root.join("target/image-model.txt");
+    let sidecar = root.join(match arch {
+        Arch::X86 => "target/image-model.txt",
+        Arch::Aarch64 => "target/image-model-aarch64.txt",
+    });
     let stamp = model
         .as_ref()
         .map(|m| {
@@ -106,53 +112,107 @@ fn build_image(fresh: bool, model_arg: Option<&str>) -> PathBuf {
         .unwrap_or_default();
     let same_model = std::fs::read_to_string(&sidecar).map(|s| s == stamp).unwrap_or(false);
 
-    if !fresh && same_model && img.exists() && image::update_efi(&img, &efi) {
-        println!("updated BOOTX64.EFI in {}", img.display());
+    if !fresh && same_model && img.exists() && image::update_efi(&img, &efi, arch.boot_file()) {
+        println!("updated {} in {}", arch.boot_file(), img.display());
         return img;
     }
-    image::build(&img, &efi, model.as_deref());
+    image::build(&img, &efi, model.as_deref(), arch.boot_file());
     let _ = std::fs::write(&sidecar, stamp);
     img
+}
+
+/// --arch flag for the simple subcommands (run parses its own).
+fn arch_flag(args: &[String]) -> Arch {
+    args.iter()
+        .position(|a| a == "--arch")
+        .map(|i| Arch::parse(&args[i + 1]))
+        .unwrap_or_default()
 }
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
 }
 
-fn build_and_stage() -> (PathBuf, PathBuf) {
+fn build_and_stage(arch: Arch) -> (PathBuf, PathBuf) {
     let root = root();
-    // Custom hard-float UEFI target (the builtin one is soft-float, which
-    // both breaks AVX intrinsics and would cripple f32 math), so build
-    // core/alloc from source on nightly.
-    let status = Command::new("cargo")
-        .current_dir(&root)
-        .env_remove("CARGO") // don't let the outer stable cargo leak in
-        .args([
-            "+nightly",
-            "build",
-            "--release",
-            "-p",
-            "nr-boot",
-            "-Zbuild-std=core,alloc",
-            "-Zjson-target-spec",
-            "--target",
-            "x86_64-nightrun-uefi.json",
-        ])
-        .status()
-        .expect("run cargo (is nightly installed? rustup toolchain install nightly --component rust-src)");
-    assert!(status.success(), "nr-boot build failed");
+    let efi = match arch {
+        Arch::X86 => {
+            // Custom hard-float UEFI target (the builtin one is soft-float,
+            // which both breaks AVX intrinsics and would cripple f32 math),
+            // so build core/alloc from source on nightly.
+            let status = Command::new("cargo")
+                .current_dir(&root)
+                .env_remove("CARGO") // don't let the outer stable cargo leak in
+                .args([
+                    "+nightly",
+                    "build",
+                    "--release",
+                    "-p",
+                    "nr-boot",
+                    "-Zbuild-std=core,alloc",
+                    "-Zjson-target-spec",
+                    "--target",
+                    "x86_64-nightrun-uefi.json",
+                ])
+                .status()
+                .expect("run cargo (is nightly installed? rustup toolchain install nightly --component rust-src)");
+            assert!(status.success(), "nr-boot build failed");
+            root.join("target/x86_64-nightrun-uefi/release/nr-boot.efi")
+        }
+        Arch::Aarch64 => {
+            // Stock tier-2 target: hard-float + NEON baseline, stable
+            // toolchain, no build-std.
+            let status = Command::new("cargo")
+                .current_dir(&root)
+                .args(["build", "--release", "-p", "nr-boot", "--target", "aarch64-unknown-uefi"])
+                .status()
+                .expect("run cargo (rustup target add aarch64-unknown-uefi)");
+            assert!(status.success(), "nr-boot aarch64 build failed");
+            root.join("target/aarch64-unknown-uefi/release/nr-boot.efi")
+        }
+    };
 
-    let efi = root.join("target/x86_64-nightrun-uefi/release/nr-boot.efi");
-    let esp = root.join("target/esp");
+    let esp = root.join(match arch {
+        Arch::X86 => "target/esp",
+        Arch::Aarch64 => "target/esp-aarch64",
+    });
     let boot_dir = esp.join("EFI/BOOT");
     std::fs::create_dir_all(&boot_dir).unwrap();
-    std::fs::copy(&efi, boot_dir.join("BOOTX64.EFI")).unwrap();
+    std::fs::copy(&efi, boot_dir.join(arch.boot_file())).unwrap();
     println!("staged {}", esp.display());
     (esp, efi)
 }
 
+/// Target architecture for build/image/run. x86_64 keeps its custom
+/// hard-float target + nightly build-std; aarch64 uses the stock
+/// hard-float `aarch64-unknown-uefi` target on stable.
+#[derive(Clone, Copy, PartialEq, Default)]
+enum Arch {
+    #[default]
+    X86,
+    Aarch64,
+}
+
+impl Arch {
+    fn parse(v: &str) -> Arch {
+        match v {
+            "x86_64" | "x86" => Arch::X86,
+            "aarch64" | "arm64" => Arch::Aarch64,
+            other => panic!("unknown --arch {other} (x86_64|aarch64)"),
+        }
+    }
+
+    fn boot_file(self) -> &'static str {
+        match self {
+            Arch::X86 => "BOOTX64.EFI",
+            Arch::Aarch64 => "BOOTAA64.EFI",
+        }
+    }
+}
+
 #[derive(Default)]
 struct RunOpts {
+    arch: Arch,
     window: bool,
     img: bool,
     model: Option<String>,
@@ -169,6 +229,7 @@ fn parse_run_opts(args: &[String]) -> RunOpts {
     while let Some(a) = it.next() {
         let mut val = || it.next().expect("missing value").clone();
         match a.as_str() {
+            "--arch" => o.arch = Arch::parse(&val()),
             "--window" => o.window = true,
             "--img" => o.img = true,
             "--model" => o.model = Some(val()),
@@ -197,36 +258,61 @@ fn run(opts: RunOpts) {
     // exceeds QEMU's virtual-FAT limits); the default boots the staged ESP
     // directory for a fast dev loop.
     let boot_drive = if opts.img {
-        let img = build_image(false, opts.model.as_deref());
+        let img = build_image(false, opts.model.as_deref(), opts.arch);
         format!("format=raw,file={}", img.display())
     } else {
-        let (esp, _) = build_and_stage();
+        let (esp, _) = build_and_stage(opts.arch);
         format!("format=raw,file=fat:rw:{}", esp.display())
     };
     let target = root.join("target");
-
-    let ovmf_code = "/usr/share/OVMF/OVMF_CODE_4M.fd";
-    // Fresh vars every run: stale boot entries (e.g. from a run with
-    // different media attached) can send the firmware down PXE instead of
-    // our drive.
-    let vars = target.join("OVMF_VARS.fd");
-    std::fs::copy("/usr/share/OVMF/OVMF_VARS_4M.fd", &vars).expect("copy OVMF vars");
 
     let qmp_sock = target.join("qmp.sock");
     let _ = std::fs::remove_file(&qmp_sock);
     let serial_log = target.join("serial.log");
 
-    let mut cmd = Command::new("qemu-system-x86_64");
-    cmd.current_dir(&root)
-        .args(["-machine", "q35"])
-        .args(["-accel", "kvm", "-accel", "tcg"])
-        .args(["-cpu", "max"])
-        .args(["-m", opts.mem.as_deref().unwrap_or("2G")])
-        .args(["-smp", opts.smp.as_deref().unwrap_or("8")])
-        .args(["-drive", &format!("if=pflash,format=raw,readonly=on,file={ovmf_code}")])
-        .args(["-drive", &format!("if=pflash,format=raw,file={}", vars.display())])
-        .args(["-drive", &boot_drive])
-        .args(["-serial", &format!("file:{}", serial_log.display())])
+    let mut cmd;
+    match opts.arch {
+        Arch::X86 => {
+            let ovmf_code = "/usr/share/OVMF/OVMF_CODE_4M.fd";
+            // Fresh vars every run: stale boot entries (e.g. from a run
+            // with different media attached) can send the firmware down
+            // PXE instead of our drive.
+            let vars = target.join("OVMF_VARS.fd");
+            std::fs::copy("/usr/share/OVMF/OVMF_VARS_4M.fd", &vars).expect("copy OVMF vars");
+            cmd = Command::new("qemu-system-x86_64");
+            cmd.current_dir(&root)
+                .args(["-machine", "q35"])
+                .args(["-accel", "kvm", "-accel", "tcg"])
+                .args(["-cpu", "max"])
+                .args(["-m", opts.mem.as_deref().unwrap_or("2G")])
+                .args(["-smp", opts.smp.as_deref().unwrap_or("8")])
+                .args(["-drive", &format!("if=pflash,format=raw,readonly=on,file={ovmf_code}")])
+                .args(["-drive", &format!("if=pflash,format=raw,file={}", vars.display())])
+                .args(["-drive", &boot_drive]);
+        }
+        Arch::Aarch64 => {
+            // Generic aarch64 UEFI machine under TCG (the host is x86;
+            // QEMU cannot emulate a Pi 5 — this validates arch
+            // correctness, not Pi hardware). AAVMF is Ubuntu's packaged
+            // ARM64 EDK2.
+            let vars = target.join("AAVMF_VARS.fd");
+            std::fs::copy("/usr/share/AAVMF/AAVMF_VARS.fd", &vars).expect("copy AAVMF vars");
+            cmd = Command::new("qemu-system-aarch64");
+            cmd.current_dir(&root)
+                .args(["-machine", "virt"])
+                .args(["-accel", "tcg,thread=multi"])
+                .args(["-cpu", "cortex-a76"])
+                .args(["-m", opts.mem.as_deref().unwrap_or("3G")])
+                .args(["-smp", opts.smp.as_deref().unwrap_or("4")])
+                .args(["-drive", &format!("if=pflash,format=raw,readonly=on,file=/usr/share/AAVMF/AAVMF_CODE.fd")])
+                .args(["-drive", &format!("if=pflash,format=raw,file={}", vars.display())])
+                .args(["-device", "virtio-gpu-pci"])
+                .args(["-device", "qemu-xhci", "-device", "usb-kbd"])
+                .args(["-drive", &format!("if=none,id=boot,{boot_drive}")])
+                .args(["-device", "virtio-blk-pci,drive=boot"]);
+        }
+    }
+    cmd.args(["-serial", &format!("file:{}", serial_log.display())])
         .args(["-qmp", &format!("unix:{},server=on,wait=off", qmp_sock.display())])
         .args(["-monitor", "none"]);
     if !opts.window {

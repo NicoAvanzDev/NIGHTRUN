@@ -10,7 +10,7 @@ use uefi::proto::pi::mp::MpServices;
 
 extern "efiapi" fn worker_entry(_arg: *mut c_void) {
     // Each AP needs its own AVX enable (XCR0 is per-core).
-    crate::enable_avx_quiet();
+    crate::enable_simd_quiet();
     nr_tensor::parallel::POOL.worker_loop();
 }
 

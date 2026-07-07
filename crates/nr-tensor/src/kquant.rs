@@ -6,6 +6,17 @@
 
 use crate::f16::{f16_to_f32, f32_to_f16};
 
+// Per-arch SIMD backend alias (see kernels.rs).
+#[cfg(target_arch = "x86_64")]
+mod simd {
+    pub use super::{
+        dot_q4k_avx2 as dot_q4k, dot_q4k_avx2_x4 as dot_q4k_x4, dot_q6k_avx2 as dot_q6k,
+        dot_q6k_avx2_x4 as dot_q6k_x4,
+    };
+}
+#[cfg(target_arch = "aarch64")]
+use crate::neon::kquant as simd;
+
 pub const QK_K: usize = 256;
 
 /// 256 weights: two f16 super-scales + 8 six-bit (scale, min) pairs +
@@ -238,6 +249,7 @@ pub fn dot_q6k_scalar(w: &[BlockQ6K], x: &[BlockQ8K]) -> f32 {
 /// # Safety
 /// Caller must ensure AVX2+FMA are supported and YMM state is enabled
 /// (see [`crate::cpu::fast_path`]).
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma")]
 pub unsafe fn dot_q4k_avx2(w: &[BlockQ4K], x: &[BlockQ8K]) -> f32 {
     use core::arch::x86_64::*;
@@ -293,6 +305,7 @@ pub unsafe fn dot_q4k_avx2(w: &[BlockQ4K], x: &[BlockQ8K]) -> f32 {
 ///
 /// # Safety
 /// Caller must ensure AVX2+FMA are supported and YMM state is enabled.
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma")]
 pub unsafe fn dot_q4k_avx2_x4(w: &[BlockQ4K], xs: [&[BlockQ8K]; 4]) -> [f32; 4] {
     use core::arch::x86_64::*;
@@ -358,6 +371,7 @@ pub unsafe fn dot_q4k_avx2_x4(w: &[BlockQ4K], xs: [&[BlockQ8K]; 4]) -> [f32; 4] 
 ///
 /// # Safety
 /// Caller must ensure AVX2+FMA are supported and YMM state is enabled.
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma")]
 pub unsafe fn dot_q6k_avx2_x4(w: &[BlockQ6K], xs: [&[BlockQ8K]; 4]) -> [f32; 4] {
     use core::arch::x86_64::*;
@@ -420,6 +434,7 @@ pub unsafe fn dot_q6k_avx2_x4(w: &[BlockQ6K], xs: [&[BlockQ8K]; 4]) -> [f32; 4] 
 
 /// # Safety
 /// Caller must ensure AVX2+FMA are supported and YMM state is enabled.
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma")]
 pub unsafe fn dot_q6k_avx2(w: &[BlockQ6K], x: &[BlockQ8K]) -> f32 {
     use core::arch::x86_64::*;
@@ -476,6 +491,7 @@ pub unsafe fn dot_q6k_avx2(w: &[BlockQ6K], x: &[BlockQ8K]) -> f32 {
     hsum256(acc)
 }
 
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn hsum256(v: core::arch::x86_64::__m256) -> f32 {
     use core::arch::x86_64::*;
@@ -500,7 +516,7 @@ impl SendPtr {
 }
 
 macro_rules! kquant_matvec {
-    ($name:ident, $block:ty, $scalar:ident, $avx2:ident) => {
+    ($name:ident, $block:ty, $scalar:ident, $avx2:path) => {
         /// y[r] = dot(w[r, :], x) with rows split across the worker pool.
         pub fn $name(y: &mut [f32], w: &[$block], x: &[BlockQ8K], rows: usize, cols: usize) {
             let bpr = cols / QK_K;
@@ -526,11 +542,11 @@ macro_rules! kquant_matvec {
     };
 }
 
-kquant_matvec!(matvec_q4k, BlockQ4K, dot_q4k_scalar, dot_q4k_avx2);
-kquant_matvec!(matvec_q6k, BlockQ6K, dot_q6k_scalar, dot_q6k_avx2);
+kquant_matvec!(matvec_q4k, BlockQ4K, dot_q4k_scalar, simd::dot_q4k);
+kquant_matvec!(matvec_q6k, BlockQ6K, dot_q6k_scalar, simd::dot_q6k);
 
 macro_rules! kquant_matmul {
-    ($name:ident, $block:ty, $scalar:ident, $avx2:ident, $avx2_x4:ident) => {
+    ($name:ident, $block:ty, $scalar:ident, $avx2:path, $avx2_x4:path) => {
         /// Batched matvec: y[b][r] = dot(w[r, :], xs[b]); bit-identical to
         /// per-token matvec, with the weight row reused across the batch.
         pub fn $name(
@@ -586,8 +602,8 @@ macro_rules! kquant_matmul {
     };
 }
 
-kquant_matmul!(matmul_q4k, BlockQ4K, dot_q4k_scalar, dot_q4k_avx2, dot_q4k_avx2_x4);
-kquant_matmul!(matmul_q6k, BlockQ6K, dot_q6k_scalar, dot_q6k_avx2, dot_q6k_avx2_x4);
+kquant_matmul!(matmul_q4k, BlockQ4K, dot_q4k_scalar, simd::dot_q4k, simd::dot_q4k_x4);
+kquant_matmul!(matmul_q6k, BlockQ6K, dot_q6k_scalar, simd::dot_q6k, simd::dot_q6k_x4);
 
 // ---- Test-support quantizers (host reference; converter uses GGUF bytes) --
 

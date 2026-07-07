@@ -1,12 +1,12 @@
 //! Build nightrun.img: GPT disk with a single FAT32 ESP holding
-//! EFI/BOOT/BOOTX64.EFI and model.nrm.
+//! EFI/BOOT/<BOOTX64|BOOTAA64>.EFI and model.nrm.
 
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 const LB: u64 = 512;
 
-pub fn build(img_path: &Path, efi: &Path, model: Option<&Path>) {
+pub fn build(img_path: &Path, efi: &Path, model: Option<&Path>, boot_file: &str) {
     let model_size = model.map(|m| std::fs::metadata(m).expect("model file").len()).unwrap_or(0);
     let efi_size = std::fs::metadata(efi).expect("efi binary").len();
 
@@ -74,7 +74,7 @@ pub fn build(img_path: &Path, efi: &Path, model: Option<&Path>) {
     {
         let root = fs.root_dir();
         let boot = root.create_dir("EFI").unwrap().create_dir("BOOT").unwrap();
-        copy_into(&boot, "BOOTX64.EFI", efi);
+        copy_into(&boot, boot_file, efi);
         if let Some(model) = model {
             copy_into(&root, "model.nrm", model);
         }
@@ -113,8 +113,8 @@ fn copy_into<IO: fatfs::ReadWriteSeek>(
     dst.flush().unwrap();
 }
 
-/// Overwrite just BOOTX64.EFI inside an existing image (fast dev loop).
-pub fn update_efi(img_path: &Path, efi: &Path) -> bool {
+/// Overwrite just the boot EFI inside an existing image (fast dev loop).
+pub fn update_efi(img_path: &Path, efi: &Path, boot_file: &str) -> bool {
     let Ok(mut file) = std::fs::OpenOptions::new().read(true).write(true).open(img_path) else {
         return false;
     };
@@ -134,7 +134,7 @@ pub fn update_efi(img_path: &Path, efi: &Path) -> bool {
     {
         let root = fs.root_dir();
         let Ok(boot) = root.open_dir("EFI/BOOT") else { return false };
-        copy_into(&boot, "BOOTX64.EFI", efi);
+        copy_into(&boot, boot_file, efi);
     }
     fs.unmount().is_ok()
 }

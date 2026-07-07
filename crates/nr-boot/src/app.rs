@@ -103,7 +103,7 @@ impl BootUi<'_> {
         nr_ui::loading::draw(self.surf, self.fonts, &st);
         self.display.present(self.surf);
         loop {
-            unsafe { core::arch::asm!("hlt") };
+            crate::halt();
         }
     }
 }
@@ -114,7 +114,7 @@ fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx
 
     // Stage 0: runtime init (SIMD + multi-core bring-up).
     ui.show(0, 300, "TSC clock calibrated");
-    let simd = if nr_tensor_fast() { "AVX2+FMA kernels" } else { "scalar kernels (no AVX2)" };
+    let simd = nr_tensor::cpu::simd_label();
     ui.show(0, 600, simd);
     let workers = crate::smp::start_workers();
     ui.show(0, 1000, &alloc::format!("{} cores online ({} inference workers)", workers + 1, workers));
@@ -235,10 +235,6 @@ fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx
         ftl_ms: 0,
         assistant: model.meta.arch.assistant_label(),
     }
-}
-
-fn nr_tensor_fast() -> bool {
-    nr_tensor::cpu::fast_path()
 }
 
 fn conventional_ram_mb() -> u32 {
