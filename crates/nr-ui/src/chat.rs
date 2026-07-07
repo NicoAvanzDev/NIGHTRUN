@@ -76,7 +76,7 @@ pub fn draw(
     surf.clear(theme::BG_DEEP);
     let content_col = "user:".len().max(stats.assistant.len() + 1) + 1;
     status_bar(surf, fonts, stats);
-    input_bar(surf, fonts, input, cursor_on, stats.generating, content_col);
+    input_bar(surf, fonts, input, cursor_on, stats.generating);
     let scroll = scrollback(surf, fonts, turns, stats.generating, scroll, stats.assistant, content_col);
     draw::scanlines(surf, 26);
     scroll
@@ -146,14 +146,7 @@ fn status_bar(surf: &mut Surface, fonts: &Fonts, stats: &Stats) {
     draw::text(surf, f, rx, ty, &right, rate_col, 1, 0);
 }
 
-fn input_bar(
-    surf: &mut Surface,
-    fonts: &Fonts,
-    input: &str,
-    cursor_on: bool,
-    generating: bool,
-    content_col: usize,
-) {
+fn input_bar(surf: &mut Surface, fonts: &Fonts, input: &str, cursor_on: bool, generating: bool) {
     let w = surf.width as i32;
     let h = surf.height as i32;
     let y0 = h - INPUT_H;
@@ -166,8 +159,10 @@ fn input_bar(
         draw::text(surf, f, MARGIN, ty, ">> generating - press ESC to stop", theme::TEXT_DIM, 1, 0);
         return;
     }
+    // Input follows the label after a single standard space (unlike the
+    // transcript, which aligns to the shared content column).
     draw::text(surf, f, MARGIN, ty, "user:", theme::NEON_CYAN, 1, 0);
-    let tx = MARGIN + content_col as i32 * f.width as i32;
+    let tx = MARGIN + ("user:".len() as i32 + 1) * f.width as i32;
 
     // Show the tail of the input if it overflows.
     let max_cols = ((w - tx - MARGIN - f.width as i32) / f.width as i32).max(1) as usize;
