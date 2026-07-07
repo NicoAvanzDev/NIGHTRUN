@@ -257,8 +257,15 @@ ul.plain li::marker { color: var(--magenta); }
   transition: border-color 140ms ease;
 }
 .card:hover { border-color: var(--border); }
-.card h4 { margin: 0 0 0.45rem; font-size: 1rem; }
-.card h4::before { content: "▸ "; color: var(--cyan); }
+.card h4 { margin: 0 0 0.45rem; font-size: 1rem; display: flex; align-items: center; gap: 0.55rem; }
+.card h4::before {
+  content: "";
+  flex: none;
+  width: 0; height: 0;
+  border-left: 7px solid var(--cyan);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+}
 .card p { color: var(--dim); font-size: 0.92rem; line-height: 1.6; }
 
 /* ---------- screenshots ---------- */
