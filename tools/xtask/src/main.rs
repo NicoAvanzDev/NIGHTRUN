@@ -91,8 +91,9 @@ fn bench() {
     for pat in [
         "[smp]",
         "workers active",
-        "model loaded:",
-        "verified in",
+        // One line since streaming verification landed:
+        // "[boot] model loaded + verified (streaming CRC) in N ms"
+        "model loaded",
         "chat-ready in",
         "prefill",
         "milli-tok/s",

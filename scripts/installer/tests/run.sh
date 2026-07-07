@@ -185,7 +185,7 @@ t "logs: timestamped path shape" bash -c '
     [[ "$p" =~ ^build/nightrun-installer-logs/[0-9]{8}-[0-9]{6}$ ]]'
 
 # ---- live protected-disk resolution (host, read-only) ----
-live_protected="$(NR_PROTECTED_FIXTURE= nr_protected_disks)"
+live_protected="$(NR_PROTECTED_FIXTURE='' nr_protected_disks)"
 root_disk="$(lsblk -snlo NAME -- "$(findmnt -no SOURCE --target /)" 2>/dev/null | tail -1)"
 t "live: root physical disk is protected" grep -qx "/dev/$root_disk" <<<"$live_protected"
 t "live: protected paths are clean /dev entries" bash -c '! grep -qvE "^/dev/[a-zA-Z0-9_-]+$" <<<"$1"' _ "$live_protected"
@@ -194,6 +194,7 @@ t "live: protected paths are clean /dev entries" bash -c '! grep -qvE "^/dev/[a-
 # shellcheck source=../lib/verify.sh
 source "$LIB/verify.sh"
 # test seam: no sudo; drop O_DIRECT (regular files may reject it)
+# shellcheck disable=SC2317  # invoked indirectly through nr_readback_sha
 nr_dd() {
     local a=() x
     for x in "$@"; do [[ "$x" == iflag=direct ]] || a+=("$x"); done
