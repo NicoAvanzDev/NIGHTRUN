@@ -151,7 +151,7 @@ Granite 3B ≈ 4.5-6 tok/s. Numbers are recorded when measured, not before.
 ## Merge gate status (do not merge feature/rpi5-support until all true)
 
 - [x] x86 tests + parity green after every shared change (51 tests)
-- [x] x86 benches within noise of docs/baseline-x86.md (5.8s boot / 57 tok/s pp re-measured after R1)
+- [x] x86 benches within noise of docs/baseline-x86.md (5.8s boot / 57 tok/s pp after R1; final A/B master-vs-branch 2026-07-07: greedy outputs byte-identical for Granite+Qwen, interleaved decode timings indistinguishable — qwen 11.47/11.46, 11.72/11.72 tok/s)
 - [x] aarch64 kernels bit-identical to scalar (qemu-user test rig)
 - [x] full engine e2e on aarch64 UEFI in QEMU (chat + generation)
 - [ ] x86 USB boot re-verified on real hardware
