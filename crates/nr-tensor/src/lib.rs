@@ -10,6 +10,8 @@ pub mod cpu;
 pub mod f16;
 pub mod kernels;
 pub mod kquant;
+#[cfg(target_arch = "aarch64")]
+pub mod neon;
 pub mod parallel;
 pub mod q8;
 pub mod rope;

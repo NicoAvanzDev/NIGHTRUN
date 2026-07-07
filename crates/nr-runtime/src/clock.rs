@@ -1,14 +1,28 @@
-//! TSC-based wall clock. Calibrated once against a firmware stall.
+//! Monotonic tick clock, calibrated once against a firmware stall.
+//! Tick source per architecture: x86 TSC, aarch64 generic timer.
 
 #[derive(Clone, Copy)]
 pub struct Clock {
     ticks_per_ms: u64,
 }
 
+/// Read the raw monotonic tick counter (name kept from the x86-only days).
+#[cfg(target_arch = "x86_64")]
 #[inline]
 pub fn rdtsc() -> u64 {
     // SAFETY: RDTSC is unprivileged reading of the timestamp counter.
     unsafe { core::arch::x86_64::_rdtsc() }
+}
+
+/// Read the raw monotonic tick counter (aarch64 generic timer, CNTVCT_EL0
+/// — unprivileged, constant-rate).
+#[cfg(target_arch = "aarch64")]
+#[inline]
+pub fn rdtsc() -> u64 {
+    let ticks: u64;
+    // SAFETY: CNTVCT_EL0 reads are permitted at all ELs UEFI runs at.
+    unsafe { core::arch::asm!("mrs {}, cntvct_el0", out(reg) ticks, options(nostack, nomem)) };
+    ticks
 }
 
 impl Clock {

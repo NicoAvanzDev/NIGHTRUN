@@ -1,4 +1,6 @@
-use nr_tensor::kernels::{dot_q8_avx2, dot_q8_scalar, matvec_q8};
+use nr_tensor::kernels::{dot_q8_scalar, matvec_q8};
+#[cfg(target_arch = "x86_64")]
+use nr_tensor::kernels::dot_q8_avx2;
 use nr_tensor::q8::{self, BlockQ8_0, QK8_0};
 use nr_tensor::rope::{self, Llama3Scaling};
 use nr_tensor::vec;
@@ -73,6 +75,7 @@ fn quantize_error_bound() {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 #[test]
 fn avx2_matches_scalar() {
     assert!(cpu::fast_path(), "test host must have AVX2+FMA");

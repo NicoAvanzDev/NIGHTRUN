@@ -1,5 +1,18 @@
 # NightRun benchmarks (measured)
 
+## Raspberry Pi 5 (real hardware, 2026-07-07 — first measurements)
+
+Board: Pi 5 D0 stepping, 8 GB, SD boot; firmware built from pinned
+source (docs/rpi5-uefi.md); NEON kernels, 4 cores via MP services.
+
+| model | pp | ftl | decode |
+|---|---|---|---|
+| Granite 4.1 3B Q4_K_M | 6.2 tok/s | 1.9 s | 3.0 tok/s |
+
+(Cooling setup + sustained-load drift measurement pending; sdot-based
+q8 dot is a known future NEON optimization.)
+
+
 ## 2026-07-07 update: batched prefill + streaming CRC
 
 Prefill now runs prompt tokens in batches of up to 64 through 4-wide

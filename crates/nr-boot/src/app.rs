@@ -24,9 +24,12 @@ fn stall_us(us: u64) {
     boot::stall(Duration::from_micros(us));
 }
 
+/// CPU architecture as spoken text (platform crate, so cfg is fine here).
+const ARCH_NAME: &str = if cfg!(target_arch = "aarch64") { "ARM64" } else { "x86_64" };
+
 fn system_prompt(model_name: &str) -> String {
     alloc::format!(
-        "You are NightRun, a helpful assistant running {model_name} fully offline on bare-metal x86_64 hardware - no operating system underneath. Be concise and friendly."
+        "You are NightRun, a helpful assistant running {model_name} fully offline on bare-metal {ARCH_NAME} hardware - no operating system underneath. Be concise and friendly."
     )
 }
 
@@ -103,7 +106,7 @@ impl BootUi<'_> {
         nr_ui::loading::draw(self.surf, self.fonts, &st);
         self.display.present(self.surf);
         loop {
-            unsafe { core::arch::asm!("hlt") };
+            crate::halt();
         }
     }
 }
@@ -114,11 +117,26 @@ fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx
 
     // Stage 0: runtime init (SIMD + multi-core bring-up).
     ui.show(0, 300, "TSC clock calibrated");
-    let simd = if nr_tensor_fast() { "AVX2+FMA kernels" } else { "scalar kernels (no AVX2)" };
+    let simd = nr_tensor::cpu::simd_label();
     ui.show(0, 600, simd);
-    let workers = crate::smp::start_workers();
-    ui.show(0, 1000, &alloc::format!("{} cores online ({} inference workers)", workers + 1, workers));
+    let (workers, smp_note) = crate::smp::start_workers();
+    if workers == 0 {
+        // Visible diagnosis on hardware without serial; linger briefly.
+        ui.show(0, 1000, &alloc::format!("single core ({smp_note})"));
+        stall_us(1_500_000);
+    } else {
+        ui.show(0, 1000, &alloc::format!("{} cores online ({} inference workers)", workers + 1, workers));
+    }
     stall_us(150_000);
+
+    // Pi 5: the fan is OS-managed and would otherwise stay off; run it
+    // at 100% for the whole session (no thermal management exists here).
+    #[cfg(target_arch = "aarch64")]
+    {
+        let fan = crate::fan::spin_up();
+        ui.show(0, 1000, if fan { "cooling fan: 100%" } else { "no fan control (RP1 not found)" });
+        stall_us(400_000);
+    }
 
     // Stage 1: memory scan.
     let ram_mb = conventional_ram_mb();
@@ -235,10 +253,6 @@ fn boot_sequence(display: Display, fonts: Fonts, clock: Clock, surf: &mut nr_gfx
         ftl_ms: 0,
         assistant: model.meta.arch.assistant_label(),
     }
-}
-
-fn nr_tensor_fast() -> bool {
-    nr_tensor::cpu::fast_path()
 }
 
 fn conventional_ram_mb() -> u32 {

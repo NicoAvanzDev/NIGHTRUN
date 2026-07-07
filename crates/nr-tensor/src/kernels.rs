@@ -5,6 +5,19 @@
 use crate::cpu;
 use crate::q8::{BlockQ8_0, QK8_0};
 
+// Architecture-specific SIMD backends behind one alias; call sites below
+// are cfg-free. The active backend is only entered when
+// `cpu::fast_path()` / `cpu::fast_f16()` says its features are present.
+#[cfg(target_arch = "x86_64")]
+mod simd {
+    pub use super::{
+        axpy_f16_f16c as axpy_f16, dot_f16_f16c as dot_f16, dot_q8_avx2 as dot_q8,
+        dot_q8_avx2_x4 as dot_q8_x4,
+    };
+}
+#[cfg(target_arch = "aarch64")]
+use crate::neon::kernels as simd;
+
 struct SendPtr(*mut f32);
 unsafe impl Send for SendPtr {}
 unsafe impl Sync for SendPtr {}
@@ -45,8 +58,8 @@ pub fn matvec_q8_range(
     if cpu::fast_path() {
         for r in row0..row1 {
             let row = &w[r * blocks_per_row..(r + 1) * blocks_per_row];
-            // SAFETY: fast_path() verified AVX2+FMA and enabled YMM state.
-            y[r - row0] = unsafe { dot_q8_avx2(row, x) };
+            // SAFETY: fast_path() verified the backend's features.
+            y[r - row0] = unsafe { simd::dot_q8(row, x) };
         }
     } else {
         for r in row0..row1 {
@@ -96,8 +109,8 @@ pub fn matmul_q8(
             // 4-wide tiles share weight loads across the batch.
             while fast && b + 4 <= batch {
                 let vs = unsafe {
-                    // SAFETY: fast_path() verified AVX2+FMA+YMM.
-                    dot_q8_avx2_x4(row, [
+                    // SAFETY: fast_path() verified the backend's features.
+                    simd::dot_q8_x4(row, [
                         &xs[b * bpr..(b + 1) * bpr],
                         &xs[(b + 1) * bpr..(b + 2) * bpr],
                         &xs[(b + 2) * bpr..(b + 3) * bpr],
@@ -113,8 +126,8 @@ pub fn matmul_q8(
             while b < batch {
                 let x = &xs[b * bpr..(b + 1) * bpr];
                 let v = if fast {
-                    // SAFETY: fast_path() verified AVX2+FMA+YMM.
-                    unsafe { dot_q8_avx2(row, x) }
+                    // SAFETY: fast_path() verified the backend's features.
+                    unsafe { simd::dot_q8(row, x) }
                 } else {
                     dot_q8_scalar(row, x)
                 };
@@ -128,9 +141,9 @@ pub fn matmul_q8(
 
 /// dot(k, q) where `k` holds f16 bits (KV cache) and `q` is f32.
 pub fn dot_f16(k: &[u16], q: &[f32]) -> f32 {
-    if cpu::features().f16c && cpu::fast_path() {
-        // SAFETY: F16C+AVX2+FMA verified.
-        unsafe { dot_f16_f16c(k, q) }
+    if cpu::fast_f16() {
+        // SAFETY: fast_f16() verified the backend's features.
+        unsafe { simd::dot_f16(k, q) }
     } else {
         let mut s = 0f32;
         for (&kb, &qv) in k.iter().zip(q) {
@@ -142,9 +155,9 @@ pub fn dot_f16(k: &[u16], q: &[f32]) -> f32 {
 
 /// out += a * v where `v` holds f16 bits (KV cache values row).
 pub fn axpy_f16(out: &mut [f32], a: f32, v: &[u16]) {
-    if cpu::features().f16c && cpu::fast_path() {
-        // SAFETY: F16C+AVX2+FMA verified.
-        unsafe { axpy_f16_f16c(out, a, v) };
+    if cpu::fast_f16() {
+        // SAFETY: fast_f16() verified the backend's features.
+        unsafe { simd::axpy_f16(out, a, v) };
     } else {
         for (o, &vb) in out.iter_mut().zip(v) {
             *o += a * crate::f16::f16_to_f32(vb);
@@ -152,8 +165,9 @@ pub fn axpy_f16(out: &mut [f32], a: f32, v: &[u16]) {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma,f16c")]
-unsafe fn dot_f16_f16c(k: &[u16], q: &[f32]) -> f32 {
+pub unsafe fn dot_f16_f16c(k: &[u16], q: &[f32]) -> f32 {
     use core::arch::x86_64::*;
     let n = k.len().min(q.len());
     let mut acc = _mm256_setzero_ps();
@@ -178,8 +192,9 @@ unsafe fn dot_f16_f16c(k: &[u16], q: &[f32]) -> f32 {
     sum
 }
 
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma,f16c")]
-unsafe fn axpy_f16_f16c(out: &mut [f32], a: f32, v: &[u16]) {
+pub unsafe fn axpy_f16_f16c(out: &mut [f32], a: f32, v: &[u16]) {
     use core::arch::x86_64::*;
     let n = out.len().min(v.len());
     let av = _mm256_set1_ps(a);
@@ -200,6 +215,7 @@ unsafe fn axpy_f16_f16c(out: &mut [f32], a: f32, v: &[u16]) {
 ///
 /// # Safety
 /// Caller must ensure AVX2+FMA are supported and YMM state is enabled.
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma")]
 pub unsafe fn dot_q8_avx2_x4(w: &[BlockQ8_0], xs: [&[BlockQ8_0]; 4]) -> [f32; 4] {
     use core::arch::x86_64::*;
@@ -233,6 +249,7 @@ pub unsafe fn dot_q8_avx2_x4(w: &[BlockQ8_0], xs: [&[BlockQ8_0]; 4]) -> [f32; 4]
 /// # Safety
 /// Caller must ensure AVX2+FMA are supported and YMM state is enabled
 /// (see [`cpu::fast_path`]).
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma")]
 pub unsafe fn dot_q8_avx2(w: &[BlockQ8_0], x: &[BlockQ8_0]) -> f32 {
     use core::arch::x86_64::*;
