@@ -1,3 +1,6 @@
+[alias]
+xtask = "run --release -p xtask --"
+
 # aarch64 kernel tests run cross-compiled (static musl, linked by
 # rust-lld — no cross-gcc needed) under qemu-user:
 #   cargo test -p nr-tensor --target aarch64-unknown-linux-musl
