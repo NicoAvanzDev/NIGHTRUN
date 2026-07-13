@@ -4,7 +4,9 @@
 
 **A local LLM runtime that boots from USB and runs without a conventional operating system.**
 
-<img src="web/assets/screenshots/splash.png" alt="NightRun boot splash: neon sunset over a grid horizon" width="720">
+<img src="web/assets/nightrun-demo.gif" alt="NightRun booting in QEMU: splash, model loading with inline CRC, then a prompt answered by Llama 3.2 on the framebuffer" width="720">
+
+*Real boot, one cut: loading and prefill sped up, generation at actual speed (Llama 3.2 1B, QEMU/KVM, 8 cores).*
 
 </div>
 
