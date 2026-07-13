@@ -1,5 +1,8 @@
 # x86_64 baseline for the Pi 5 port (feature/rpi5-support)
 
+Historical snapshot, frozen on purpose. These numbers anchored the
+merge gate for the Pi port; later measurements live in benchmarks.md.
+
 Reference point captured at branch creation (2026-07-07, HEAD = master @
 fdde761 lineage). All later x86 measurements on this branch compare
 against these numbers; a repeatable regression beyond ~2-3% blocks the
@@ -26,7 +29,7 @@ tests, font coverage).
 | model | boot-to-chat (after splash) | pp | tg |
 |---|---|---|---|
 | Llama 1B (-m 4G) | 5.6 s | 52 tok/s | ~20 tok/s |
-| Qwen3 4B (-m 6G) | 11.5 s | — | ~10 tok/s |
+| Qwen3 4B (-m 6G) | 11.5 s | n/a | ~10 tok/s |
 | Granite 3B (-m 5G) | 9.5 s | 24-26.5 tok/s | 12.5-14 tok/s |
 
 Environment: 12-thread AVX2 host, 15 GB RAM; QEMU numbers vary ±20% with

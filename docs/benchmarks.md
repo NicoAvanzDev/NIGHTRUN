@@ -1,6 +1,6 @@
 # NightRun benchmarks (measured)
 
-## Raspberry Pi 5 (real hardware, 2026-07-07 — first measurements)
+## Raspberry Pi 5 (real hardware, 2026-07-07, first measurements)
 
 Board: Pi 5 D0 stepping, 8 GB, SD boot; firmware built from pinned
 source (docs/rpi5-uefi.md); NEON kernels, 4 cores via MP services.
@@ -16,7 +16,7 @@ q8 dot is a known future NEON optimization.)
 ## 2026-07-07 update: batched prefill + streaming CRC
 
 Prefill now runs prompt tokens in batches of up to 64 through 4-wide
-register-tiled kernels (bit-identical results to sequential decode —
+register-tiled kernels (bit-identical results to sequential decode,
 tested), and model checksums are computed while chunks stream from disk
 (no post-load verify pass).
 
@@ -24,7 +24,7 @@ tested), and model checksums are computed while chunks stream from disk
 |---|---|---|---|---|---|
 | Llama 1B Q8_0 | 21 tok/s | **52-56 tok/s** | 60-65 | 8.4 s | **5.6 s** |
 | Qwen3 4B Q4_K_M | 11 tok/s | **~23 tok/s** | 31-32 | 20.7 s | **11.5 s** |
-| Granite 3B Q4_K_M | 14 tok/s | **23-27 tok/s** | — | 15.0 s | **9.5 s** |
+| Granite 3B Q4_K_M | 14 tok/s | **23-27 tok/s** | n/a | 15.0 s | **9.5 s** |
 
 (host prefill sweep: batch 1/8/16/32/64 -> llama 21/…/56, qwen
 11.5/22.9/19.5/19.7/21.6 tok/s; decode unchanged.) First-token latency
@@ -33,7 +33,7 @@ for a ~70-token prompt dropped from ~4.3 s to ~2.9 s (Granite, QEMU).
 Environment: QEMU q35, KVM, `-cpu max -smp 8`, OVMF; host: 12 hardware
 threads (AVX2), 15 GB RAM. Date: 2026-07-07. Numbers are single scripted
 runs; QEMU results vary ±20% with host memory pressure (the guest
-competes with the host page cache) — ranges given where observed.
+competes with the host page cache); ranges given where observed.
 
 ## Llama 3.2 1B Instruct Q8_0 (`-m 4G`)
 
@@ -46,7 +46,7 @@ competes with the host page cache) — ranges given where observed.
 ```
 
 Host (nrhost, identical engine): 22.9 tok/s prefill, ~20 tok/s
-generation at 8 threads — marginally faster than before the Qwen
+generation at 8 threads, marginally faster than before the Qwen
 dispatch refactor (dispatch-at-load costs nothing).
 
 ## Qwen3-4B-Instruct-2507 Q4_K_M (`-m 6G`)
@@ -80,8 +80,16 @@ Memory: 2.0 GB model resident + ~380 MB arena (f16 KV at ctx 4096 =
 pinned prompts (12-16 tokens + chat reply). Note: Granite divides logits
 by 10, which compresses greedy top-2 gaps; some prompts flip single
 tokens (measured gaps < 0.4 at logit scale ~31) between internally-
-deterministic implementations, then re-converge — the same class of
+deterministic implementations, then re-converge: the same class of
 divergence llama.cpp shows across its own backends.
+
+## Context-length effect on decode (host, 8 threads, 2026-07-07)
+
+Attention reads the whole KV cache per generated token, so decode slows
+as the context fills. Measured with nrhost on Granite 4.1 3B Q4_K_M:
+~13 tok/s early in a conversation, 11.57 tok/s averaged over a 384-token
+generation. The effect keeps growing toward the 4096-token window.
+Short-context numbers above are the best case.
 
 ## Head-to-head vs llama.cpp (host, same machine)
 
@@ -98,8 +106,8 @@ Same weights, same prompt, greedy, 8 threads, ctx 4096
 
 Generation is at parity for both models (memory-bandwidth-bound, same
 integer dot schemes). Prompt processing remains ~3x slower in NightRun
-because prefill runs the unbatched single-token path — the documented
-next optimization. Benchmark llama.cpp with `-c 4096`: its default (the
+because prefill runs the unbatched single-token path, batched
+prefill landed later that day (see the update above). Benchmark llama.cpp with `-c 4096`: its default (the
 model's full training context) allocates a KV cache far beyond an
 8-16 GB machine and swaps.
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NightRun Documentation — commands, model format, benchmarks, limits</title>
+<title>NightRun Documentation: commands, model format, benchmarks, limits</title>
 <meta name="description" content="Deep reference for NightRun: chat usage, command reference, model manifests, the .nrm format, tokenizer testing, benchmark methodology, troubleshooting, limitations and roadmap.">
 <link rel="stylesheet" href="css/site.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23ffd319'/%3E%3Cstop offset='.55' stop-color='%23ff9e3d'/%3E%3Cstop offset='1' stop-color='%23ff2d95'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='6' fill='%2307020f'/%3E%3Ctext x='16' y='23' font-family='monospace' font-size='19' font-weight='bold' text-anchor='middle' fill='url(%23g)'%3EN%3C/text%3E%3C/svg%3E">
@@ -33,8 +33,8 @@
   <div class="hero">
     <h1>Documentation</h1>
     <p class="sub">
-      The practical reference. For the system design — UEFI residency, memory model, kernels,
-      validation — read the dedicated <a href="architecture.html">Architecture</a> page.
+      The practical reference. For the system design (UEFI residency, memory model, kernels,
+      validation) read the dedicated <a href="architecture.html">Architecture</a> page.
     </p>
   </div>
 
@@ -65,7 +65,7 @@ cd NIGHTRUN
 ./install.sh</code></pre>
     <p>
       The installer picks a target (x86_64 USB or Raspberry&nbsp;Pi&nbsp;5 SD), a model, builds a
-      bootable image and flashes it with verification — the full walkthrough lives on the
+      bootable image and flashes it with verification; the full walkthrough lives on the
       <a href="install.html">Install page</a>. Boot the media and you land in the chat.
     </p>
     <h3>Using the chat</h3>
@@ -73,11 +73,11 @@ cd NIGHTRUN
       <table>
         <thead><tr><th>Input</th><th>Effect</th></tr></thead>
         <tbody>
-          <tr><td><strong>Enter</strong></td><td>sends the prompt — it appears in the transcript immediately, the input locks with <code>&gt;&gt; generating — press ESC to stop</code>, and a blinking block beside the model label shows it is preparing the first token</td></tr>
+          <tr><td><strong>Enter</strong></td><td>sends the prompt: it appears in the transcript immediately, the input locks with <code>&gt;&gt; generating - press ESC to stop</code>, and a blinking block beside the model label shows it is preparing the first token</td></tr>
           <tr><td><strong>ESC</strong></td><td>stops a running generation cleanly</td></tr>
-          <tr><td><strong>← / →, Backspace, Delete</strong></td><td>edit the prompt at the caret — fix a typo mid-sentence without retyping</td></tr>
+          <tr><td><strong>← / →, Backspace, Delete</strong></td><td>edit the prompt at the caret; fix a typo mid-sentence without retyping</td></tr>
           <tr><td><strong>Up / Down, PgUp / PgDn</strong></td><td>scroll conversation history; a banner shows how far back you are</td></tr>
-          <tr><td><code>/clear</code></td><td>fresh conversation: transcript and context reset, model stays resident — instant</td></tr>
+          <tr><td><code>/clear</code></td><td>fresh conversation: transcript and context reset, model stays resident, instant</td></tr>
           <tr><td><code>/bye</code></td><td>real power-off via UEFI runtime services</td></tr>
         </tbody>
       </table>
@@ -113,7 +113,7 @@ cargo xtask bench                     <span class="c"># scripted benchmark boot 
         <thead><tr><th>Flag</th><th>Meaning</th></tr></thead>
         <tbody>
           <tr><td><code>--img</code></td><td>boot the real disk image (required for model runs; without it, a fast ESP-directory dev boot)</td></tr>
-          <tr><td><code>--arch aarch64</code></td><td>generic ARM machine under AAVMF (TCG-emulated — correctness testing, not speed)</td></tr>
+          <tr><td><code>--arch aarch64</code></td><td>generic ARM machine under AAVMF (TCG-emulated: correctness testing, not speed)</td></tr>
           <tr><td><code>--window</code></td><td>show the display (default is headless)</td></tr>
           <tr><td><code>--mem, --smp</code></td><td>guest RAM / cores; Qwen needs <code>--mem 6G</code></td></tr>
           <tr><td><code>--secs N</code></td><td>auto-quit after N seconds (scripted runs)</td></tr>
@@ -134,9 +134,9 @@ cargo run --release -p nrconvert -- model.gguf model.nrm   <span class="c"># con
         <thead><tr><th>Flag</th><th>Meaning</th></tr></thead>
         <tbody>
           <tr><td><code>--temp 0</code></td><td>greedy decoding (parity work)</td></tr>
-          <tr><td><code>--raw</code></td><td>skip the chat template — plain completion</td></tr>
+          <tr><td><code>--raw</code></td><td>skip the chat template, plain completion</td></tr>
           <tr><td><code>--batch N</code></td><td>prefill batch size for A/B measurements (1 = sequential path)</td></tr>
-          <tr><td><code>--debug-gap</code></td><td>print the top-2 logit gap per step — distinguishes real divergence from greedy near-ties</td></tr>
+          <tr><td><code>--debug-gap</code></td><td>print the top-2 logit gap per step; distinguishes real divergence from greedy near-ties</td></tr>
           <tr><td><code>-n, --ctx, --seed, --top-p</code></td><td>generation length, context, sampling controls</td></tr>
         </tbody>
       </table>
@@ -163,17 +163,17 @@ scripts/build-rpi5-firmware.sh                          <span class="c"># Pi UEF
       </table>
     </div>
     <p>
-      Three <em>architecture families</em> are implemented — Llama&nbsp;3.2, Qwen3, and Granite&nbsp;4.1
+      Three <em>architecture families</em> are implemented: Llama&nbsp;3.2, Qwen3, and Granite&nbsp;4.1
       dense transformers (hybrid SSM/MoE Granite is rejected at conversion; see the
       <a href="architecture.html#families">per-family notes</a>). Supported tensor quantizations
-      are <strong>Q8_0, Q4_K, Q6_K and F32</strong> — any GGUF build whose tensors use these
+      are <strong>Q8_0, Q4_K, Q6_K and F32</strong>; any GGUF build whose tensors use these
       converts with each tensor's exact dtype preserved: Q8_0, Q4_K_M, Q4_K_S and Q6_K artifacts
       all qualify. "Q4_K_M" is a per-tensor policy, not one format: such a file mixes Q4_K
       attention/FFN weights with Q6_K embeddings and F32 norms, and NightRun keeps that mix.
     </p>
     <h3>The catalog manifest</h3>
     <p>
-      <code>config/models.manifest</code> drives the installer's menu — one block per model with a
+      <code>config/models.manifest</code> drives the installer's menu: one block per model with a
       pinned Hugging Face revision (a commit, so moved branches can't change downloads), the exact
       filename, SHA-256, license label, minimum RAM, supported targets and sizes. The format is
       plain <code>model.&lt;id&gt;.&lt;key&gt; = value</code> lines, parsed as data (never executed).
@@ -187,7 +187,7 @@ scripts/installer/tests/run.sh</code></pre>
     <p class="muted">
       A manifest entry only lists a model; runtime compatibility is still gated by
       <code>nrconvert</code>'s inspection, and genuinely new architecture <em>families</em> need
-      engine work plus reference validation — not just a manifest line.
+      engine work plus reference validation, not just a manifest line.
     </p>
   </section>
 
@@ -199,11 +199,11 @@ scripts/installer/tests/run.sh</code></pre>
       <table>
         <thead><tr><th>Section</th><th>Contents</th></tr></thead>
         <tbody>
-          <tr><td>Header (192 B)</td><td>magic + version + architecture id; dimensions (layers, heads, KV heads, hidden/attention/FFN widths, vocabulary, max context); RoPE parameters (θ, scaling, adjacent vs NEOX style); feature flags (tied embeddings, …); <strong>four scalar multipliers</strong> (embedding, attention, residual, logit) — Granite's muP scaling lives here, neutral values elsewhere, applied branch-free</td></tr>
-          <tr><td>Tokenizer blob</td><td>vocabulary, merges, special tokens, pretokenizer id, chat-template id — everything the runtime needs to talk to the model correctly</td></tr>
-          <tr><td>Tensor table</td><td>per tensor: kind, dtype (F32 / Q8_0 / Q4_K / Q6_K), shape, offset — the source artifact's per-tensor quantization preserved exactly</td></tr>
+          <tr><td>Header (192 B)</td><td>magic + version + architecture id; dimensions (layers, heads, KV heads, hidden/attention/FFN widths, vocabulary, max context); RoPE parameters (θ, scaling, adjacent vs NEOX style); feature flags (tied embeddings, …); <strong>four scalar multipliers</strong> (embedding, attention, residual, logit); Granite's muP scaling lives here, neutral values elsewhere, applied branch-free</td></tr>
+          <tr><td>Tokenizer blob</td><td>vocabulary, merges, special tokens, pretokenizer id, chat-template id: everything the runtime needs to talk to the model correctly</td></tr>
+          <tr><td>Tensor table</td><td>per tensor: kind, dtype (F32 / Q8_0 / Q4_K / Q6_K), shape, offset; the source artifact's per-tensor quantization preserved exactly</td></tr>
           <tr><td>Data</td><td>64-byte-aligned tensor bytes, used <em>in place</em> after load (zero-copy views)</td></tr>
-          <tr><td>Integrity</td><td>two CRC-32 section checksums (metadata, data) — verified <strong>while the file streams into RAM</strong> at boot; no post-load pass</td></tr>
+          <tr><td>Integrity</td><td>two CRC-32 section checksums (metadata, data), verified <strong>while the file streams into RAM</strong> at boot; no post-load pass</td></tr>
         </tbody>
       </table>
     </div>
@@ -212,7 +212,7 @@ scripts/installer/tests/run.sh</code></pre>
       Failures are named, not mysterious: unsupported architecture families ("hybrid granite:
       rejected"), missing tensors, unknown dtypes, or tokenizer inconsistencies fail at convert
       time with a reason. The converter then re-parses its own output, re-checksums both sections,
-      and smoke-tests the tokenizer — a corrupt <code>.nrm</code> should be impossible to produce
+      and smoke-tests the tokenizer; a corrupt <code>.nrm</code> should be impossible to produce
       silently.
     </p>
   </section>
@@ -222,16 +222,16 @@ scripts/installer/tests/run.sh</code></pre>
     <p>Full text: <a href="https://github.com/hardrave/NIGHTRUN/blob/master/docs/installer.md">docs/installer.md</a>. The rules that matter:</p>
     <h3>Device safety</h3>
     <ul class="plain">
-      <li>Only <strong>whole disks</strong> on USB/SD transports are ever listed — partitions never, loop/zram/optical/RAID/device-mapper never.</li>
-      <li>Disks backing <code>/</code>, <code>/boot</code>, <code>/home</code> or active swap are excluded by proof (mount-table resolution), not by heuristics.</li>
-      <li>Internal SATA/NVMe disks are unsafe by default even when they claim to be removable — enclosures lie in both directions, so transport is the trusted signal.</li>
-      <li>Every device carries an identity fingerprint (path + size + model + serial + major:minor), re-verified before unmounting and again immediately before the first byte is written — a re-enumerated <code>/dev/sdX</code> aborts instead of hitting the wrong disk.</li>
+      <li>Only <strong>whole disks</strong> on USB/SD transports are ever listed; partitions never, loop/zram/optical/RAID/device-mapper never.</li>
+      <li>Disks backing <code>/</code>, <code>/boot</code>, <code>/home</code> or active swap are excluded by proof, not heuristics: mount sources are resolved through the full device ancestry, so stacked storage (LVM, LUKS) still points back to the physical disk.</li>
+      <li>Internal SATA/NVMe disks are unsafe by default even when they claim to be removable: enclosures lie in both directions, so transport is the trusted signal.</li>
+      <li>Every device carries an identity fingerprint (path + size + model + serial + major:minor), re-verified before unmounting and again immediately before the first byte is written, so a re-enumerated <code>/dev/sdX</code> aborts instead of hitting the wrong disk.</li>
       <li>There is no default device and no auto-pick; an empty list is a normal state with Rescan.</li>
     </ul>
     <h3>The confirmation</h3>
     <p>
       Two stages, both defaulting to no: a menu confirmation, then typing
-      <code>FLASH /dev/sdX</code> <em>exactly</em> — current device path included; <code>y</code>,
+      <code>FLASH /dev/sdX</code> <em>exactly</em>, current device path included; <code>y</code>,
       case variants, partition paths and stale paths are all rejected. One deliberate sentence
       instead of a reflex.
     </p>
@@ -255,19 +255,19 @@ scripts/installer/tests/run.sh</code></pre>
   <section id="tokenizer">
     <h2><span class="secnum">06</span>Tokenizer and template reference</h2>
     <p>
-      A model that loads perfectly but tokenizes almost-correctly produces subtly wrong output —
+      A model that loads perfectly but tokenizes almost-correctly produces subtly wrong output,
       the least debuggable failure mode there is. NightRun pins tokenization as hard as it pins
       kernels:
     </p>
     <ul class="plain">
       <li><strong>Byte-level BPE</strong> with each family's own pretokenizer regex (Llama-3 and Qwen differ; Granite uses its dbrx-style pretokenizer).</li>
-      <li><strong>Fixtures from the source of truth:</strong> <code>scripts/gen_tokenizer_fixtures.py</code> generates test cases from the official Hugging Face tokenizers with <code>split_special_tokens=True</code> — text a user types must never encode into control tokens, even if it spells one.</li>
+      <li><strong>Fixtures from the source of truth:</strong> <code>scripts/gen_tokenizer_fixtures.py</code> generates test cases from the official Hugging Face tokenizers with <code>split_special_tokens=True</code>; text a user types must never encode into control tokens, even if it spells one.</li>
       <li><strong>Template parity:</strong> chat templates are compared token-for-token against <code>apply_chat_template</code> output. Family differences that these tests guard: Qwen3 has no BOS and ChatML-style headers; Granite has no dedicated BOS (EOS doubles for it); Llama-3 uses its instruct header structure.</li>
       <li><strong>Round-trips:</strong> decode(encode(x)) identity and special-token handling are fixture-tested per family.</li>
     </ul>
     <p class="muted">
       Debug tip: when output "feels wrong", run the same prompt through
-      <code>nrhost --raw</code> (no template) and with the template — if only the templated path
+      <code>nrhost --raw</code> (no template) and with the template: if only the templated path
       misbehaves, the conversation framing is the suspect, not the model.
     </p>
   </section>
@@ -280,14 +280,14 @@ cargo run --release -p nrhost -- models/model.nrm --prompt "..."   <span class="
 cargo xtask run --img --window   <span class="c"># full boot in QEMU when platform behavior matters</span></code></pre>
     <p>
       The engine crates are dual-target: <code>no_std</code> for the EFI build, std for the host.
-      Debug inference on the host first — QEMU is for platform work (boot, video, input, SMP),
+      Debug inference on the host first; QEMU is for platform work (boot, video, input, SMP),
       and its serial log lands in <code>target/serial.log</code>.
     </p>
     <h3>What the test suite pins</h3>
     <ul class="plain">
-      <li><strong>Kernel equality:</strong> AVX2 and NEON dots against scalar references — adversarial values, saturated blocks; the NEON kernels are bit-identical to scalar by construction and asserted with <code>==</code>.</li>
+      <li><strong>Kernel equality:</strong> AVX2 and NEON dots against scalar references: adversarial values, saturated blocks; the NEON kernels are bit-identical to scalar by construction and asserted with <code>==</code>.</li>
       <li><strong>Prefill bit-identity:</strong> batched prompt processing produces the same logits <em>and</em> the same KV cache as token-at-a-time, verified against real models.</li>
-      <li><strong>Reference parity:</strong> greedy generations match llama.cpp token-for-token for all families. The rule is absolute: break parity and the code is wrong, not the fixture. One documented nuance — Granite's ÷10 logit scaling compresses top-2 gaps, so near-ties can legitimately flip between numerically-equivalent implementations; <code>nrhost --debug-gap</code> measures the gap so real bugs and coin-flips are distinguishable.</li>
+      <li><strong>Reference parity:</strong> greedy generations match llama.cpp token-for-token for all families. The rule is absolute: break parity and the code is wrong, not the fixture. One documented nuance: Granite's /10 logit scaling compresses top-2 gaps, so near-ties can legitimately flip between numerically-equivalent implementations; <code>nrhost --debug-gap</code> measures the gap so real bugs and coin-flips are distinguishable.</li>
       <li><strong>Format integrity:</strong> the streaming verifier is tested against deliberately corrupted files, byte-flip by byte-flip.</li>
     </ul>
   </section>
@@ -296,14 +296,14 @@ cargo xtask run --img --window   <span class="c"># full boot in QEMU when platfo
     <h2><span class="secnum">08</span>Benchmark methodology</h2>
     <p>Four numbers answer four different questions:</p>
     <ul class="plain">
-      <li><strong>Prompt throughput (pp)</strong> — batched prefill speed; dominates time-to-first-token for long prompts;</li>
-      <li><strong>Decode throughput (tg)</strong> — interactive generation; memory-bandwidth-bound;</li>
-      <li><strong>First-token latency (ftl)</strong> — what pressing Enter feels like;</li>
-      <li><strong>Boot-to-chat</strong> — power-on to usable, model load included.</li>
+      <li><strong>Prompt throughput (pp)</strong>: batched prefill speed; dominates time-to-first-token for long prompts;</li>
+      <li><strong>Decode throughput (tg)</strong>: interactive generation; memory-bandwidth-bound;</li>
+      <li><strong>First-token latency (ftl)</strong>: what pressing Enter feels like;</li>
+      <li><strong>Boot-to-chat</strong>: power-on to usable, model load included.</li>
     </ul>
     <div class="tablewrap">
       <table>
-        <thead><tr><th>Model</th><th>pp</th><th>tg (short ctx)</th><th>boot→chat</th><th>Conditions</th></tr></thead>
+        <thead><tr><th>Model</th><th>pp</th><th>tg (short ctx)</th><th>boot to chat</th><th>Conditions</th></tr></thead>
         <tbody>
           <tr><td>Llama 3.2 1B Q8_0</td><td>52 tok/s</td><td>~20 tok/s</td><td>5.6 s</td><td>QEMU/KVM q35, 8 cores, AVX2 host, 4 GB</td></tr>
           <tr><td>Granite 4.1 3B Q4_K_M</td><td>25 tok/s</td><td>~13 tok/s</td><td>9.5 s</td><td>QEMU/KVM q35, 8 cores, AVX2 host, 5 GB</td></tr>
@@ -316,7 +316,7 @@ cargo xtask run --img --window   <span class="c"># full boot in QEMU when platfo
     <p>
       Decode reads the entire KV cache every token, so generation slows as the context fills.
       Measured on the host (8 threads): Granite decodes ~13 tok/s early in a conversation and
-      averages <strong>11.6 tok/s across a 384-token generation</strong> — still fluid, honestly
+      averages <strong>11.6 tok/s across a 384-token generation</strong>: still fluid, plainly
       slower, and the effect continues to grow toward the 4096-token window. Short-context
       headline numbers are the <em>best</em> case, which is why this table labels them.
     </p>
@@ -324,7 +324,7 @@ cargo xtask run --img --window   <span class="c"># full boot in QEMU when platfo
     <p class="muted">
       llama.cpp comparisons are made greedy, same GGUF, same machine: on that basis NightRun's
       decode is comparable and its batched prefill lands within 1.15–1.4× of llama.cpp's. NightRun
-      makes <strong>no claim of being globally faster</strong> — the point of the project is where
+      makes <strong>no claim of being globally faster</strong>; the point of the project is where
       it runs, not a speed crown. QEMU numbers vary ±20% with host load; single benchmark numbers
       without conditions are noise.
     </p>
@@ -337,20 +337,20 @@ cargo xtask run --img --window   <span class="c"># full boot in QEMU when platfo
         <thead><tr><th>Symptom</th><th>Action</th></tr></thead>
         <tbody>
           <tr><td>No removable disk found</td><td>Insert USB/SD at least as large as the image; system disks are never listed; choose <strong>R</strong> to rescan</td></tr>
-          <tr><td>Disk cannot be unmounted</td><td>Close file managers/terminals using it — the installer names the exact blocking partition; retry</td></tr>
+          <tr><td>Disk cannot be unmounted</td><td>Close file managers/terminals using it; the installer names the exact blocking partition; retry</td></tr>
           <tr><td>Target media too small</td><td>The IMAGE READY card states the minimum; use larger media</td></tr>
-          <tr><td>GGUF incompatible</td><td><code>nrconvert --inspect</code> names the family and verdict; only Llama/Qwen3/dense-Granite are supported — hybrids are rejected by design</td></tr>
-          <tr><td>Model does not fit RAM</td><td>Llama 1B → 4 GB, Llama 3B/Granite → 6 GB, Qwen → 8 GB machines; the boot screen reports an arena failure otherwise</td></tr>
-          <tr><td>Conversion fails</td><td>Read <code>build/nightrun-installer-logs/&lt;ts&gt;/nrconvert.log</code> — the failing stage is named</td></tr>
+          <tr><td>GGUF incompatible</td><td><code>nrconvert --inspect</code> names the family and verdict; only Llama/Qwen3/dense-Granite are supported; hybrids are rejected by design</td></tr>
+          <tr><td>Model does not fit RAM</td><td>Llama 1B: 4 GB, Llama 3B/Granite: 6 GB, Qwen: 8 GB; the boot screen reports an arena failure otherwise</td></tr>
+          <tr><td>Conversion fails</td><td>Read <code>build/nightrun-installer-logs/&lt;ts&gt;/nrconvert.log</code>; the failing stage is named</td></tr>
           <tr><td>Image build fails</td><td><code>.../image.log</code>; the Pi target additionally needs the firmware payload (<code>scripts/build-rpi5-firmware.sh</code>)</td></tr>
           <tr><td>Verification fails</td><td>Media unreliable (worn flash / flaky reader): re-flash; if it repeats, different media. Never trust that drive to boot</td></tr>
           <tr><td>USB does not boot</td><td>UEFI mode on, Secure Boot off, try other ports; look for a "UEFI: &lt;name&gt;" boot-menu entry</td></tr>
-          <tr><td>UEFI boot option missing</td><td>NightRun uses the removable-media path (<code>EFI/BOOT/BOOTX64.EFI</code>) — no NVRAM entry needed; pick the drive from the boot menu directly</td></tr>
+          <tr><td>UEFI boot option missing</td><td>NightRun uses the removable-media path (<code>EFI/BOOT/BOOTX64.EFI</code>), so no NVRAM entry is needed; pick the drive from the boot menu directly</td></tr>
           <tr><td>Raspberry Pi shows no output</td><td>EEPROM must be ≥ 2025-06-09; use the HDMI port next to USB-C; press <strong>Esc</strong> during the Pi bootloader for its on-screen diagnostic log; full guide in <a href="https://github.com/hardrave/NIGHTRUN/blob/master/docs/rpi5-uefi.md">docs/rpi5-uefi.md</a></td></tr>
           <tr><td>Keyboard not detected</td><td>Use a plain wired keyboard; on the Pi prefer the black USB 2.0 ports; wireless dongles often never enumerate in firmware</td></tr>
-          <tr><td>Slow prefill</td><td>Check the boot screen's kernel line: "AVX2+FMA" / "NEON+DOTPROD" vs "scalar" — scalar means the CPU lacks vector support and everything will crawl</td></tr>
+          <tr><td>Slow prefill</td><td>Check the boot screen's kernel line: "AVX2+FMA" / "NEON+DOTPROD" vs "scalar": scalar means the CPU lacks vector support and everything will crawl</td></tr>
           <tr><td>Slow decode</td><td>Check the core count in the status bar (<code>8c</code>): <code>1c</code> means multiprocessor startup failed and the boot screen names why; also expect gradual slowdown as context fills (see section 8)</td></tr>
-          <tr><td>Model loading is slow</td><td>Load speed is media-bound — USB 3 sticks and A1/A2 SD cards load 2 GB in tens of seconds</td></tr>
+          <tr><td>Model loading is slow</td><td>Load speed is media-bound: USB 3 sticks and A1/A2 SD cards load 2 GB in tens of seconds</td></tr>
         </tbody>
       </table>
     </div>
@@ -359,20 +359,20 @@ cargo xtask run --img --window   <span class="c"># full boot in QEMU when platfo
   <section id="limits">
     <h2><span class="secnum">10</span>Limitations and non-goals</h2>
     <ul class="plain">
-      <li><strong>Not a general-purpose OS</strong> — no desktop, no applications, no networking. A single-purpose chat appliance, on purpose.</li>
+      <li><strong>Not a general-purpose OS</strong>: no desktop, no applications, no networking. A single-purpose chat appliance, on purpose.</li>
       <li><strong>Three architecture families</strong>, individually validated. No arbitrary GGUF compatibility; hybrid Granite variants are out of scope by design.</li>
-      <li><strong>RAM-bounded</strong> — the entire model is always resident; if it doesn't fit, it doesn't run.</li>
-      <li><strong>CPU only</strong> — there is no GPU path; performance ceilings are memory-bandwidth ceilings.</li>
-      <li><strong>UEFI required, Secure Boot off</strong> — images are unsigned.</li>
-      <li><strong>UEFI-resident by design</strong> — Boot Services stay up; no post-<code>ExitBootServices()</code> claim is made (the honest why: <a href="architecture.html#uefi">Architecture §3</a>).</li>
-      <li><strong>Pi 5 firmware is community-maintained</strong> — built from a pinned, diff-reviewed source; the full risk discussion lives in <a href="https://github.com/hardrave/NIGHTRUN/blob/master/docs/rpi5-uefi.md">docs/rpi5-uefi.md</a>.</li>
-      <li><strong>Young project</strong> — tested and working, with sharp edges at hardware-compatibility margins.</li>
+      <li><strong>RAM-bounded</strong>: the entire model is always resident; if it doesn't fit, it doesn't run.</li>
+      <li><strong>CPU only</strong>: there is no GPU path; performance ceilings are memory-bandwidth ceilings.</li>
+      <li><strong>UEFI required, Secure Boot off</strong>: images are unsigned.</li>
+      <li><strong>UEFI-resident by design</strong>: Boot Services stay up; no post-<code>ExitBootServices()</code> claim is made (the candid why: <a href="architecture.html#uefi">Architecture §3</a>).</li>
+      <li><strong>Pi 5 firmware is community-maintained</strong>: built from a pinned, diff-reviewed source; the full risk discussion lives in <a href="https://github.com/hardrave/NIGHTRUN/blob/master/docs/rpi5-uefi.md">docs/rpi5-uefi.md</a>.</li>
+      <li><strong>Young project</strong>: tested and working, with sharp edges at hardware-compatibility margins.</li>
     </ul>
   </section>
 
   <section id="roadmap">
     <h2><span class="secnum">11</span>Roadmap</h2>
-    <p class="muted">Working notes, honestly labeled — not commitments.</p>
+    <p class="muted">Working notes, labeled for what they are, not commitments.</p>
     <ul class="plain">
       <li><strong>In validation:</strong> Raspberry Pi 5 benchmarks with the sdot NEON kernels; sustained-load thermal runs with the fan driver.</li>
       <li><strong>Planned validation:</strong> C1-stepping Pi 5 boards (tooling supports them; untested on maintainers' hardware).</li>
@@ -399,7 +399,7 @@ scripts/installer   <span class="c">the Image Forge (see section 5)</span></code
       <a href="https://github.com/hardrave/NIGHTRUN/blob/master/docs/benchmarks.md">benchmark logs</a> ·
       <a href="https://github.com/hardrave/NIGHTRUN/issues">issues</a>.
       The contribution contract is the test suite: kernel or forward-pass changes must keep the
-      llama.cpp parity pins green — if parity breaks, the code is wrong, not the fixture.
+      llama.cpp parity pins green: if parity breaks, the code is wrong, not the fixture.
     </p>
   </section>
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NightRun Architecture — how a bootable LLM runtime works</title>
+<title>NightRun Architecture: how a bootable LLM runtime works</title>
 <meta name="description" content="The engineering behind NightRun: UEFI residency, RAM-resident models with sealed storage, batched prefill, quantized AVX2/NEON kernels, the .nrm format, and the validation pipeline.">
 <link rel="stylesheet" href="css/site.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23ffd319'/%3E%3Cstop offset='.55' stop-color='%23ff9e3d'/%3E%3Cstop offset='1' stop-color='%23ff2d95'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='6' fill='%2307020f'/%3E%3Ctext x='16' y='23' font-family='monospace' font-size='19' font-weight='bold' text-anchor='middle' fill='url(%23g)'%3EN%3C/text%3E%3C/svg%3E">
@@ -34,7 +34,7 @@
     <h1>NightRun Architecture</h1>
     <p class="sub">
       A purpose-built local LLM runtime that boots from USB and runs without a conventional
-      operating system — UEFI-resident by deliberate design, not "pure bare metal" by slogan.
+      operating system: UEFI-resident by deliberate design, not "pure bare metal" by slogan.
     </p>
   </div>
 
@@ -44,7 +44,7 @@
       <li>UEFI firmware</li>
       <li>NightRun Rust entry &amp; runtime <em>single no_std EFI application</em></li>
       <li>Platform layer <em>framebuffer (GOP) · USB keyboard · disk · multicore startup</em></li>
-      <li>Model loader <em>.nrm parsing + inline CRC verification → storage sealed</em></li>
+      <li>Model loader <em>.nrm parsing + inline CRC verification, then storage sealed</em></li>
       <li>Model fully in RAM <em>zero-copy quantized tensor views</em></li>
       <li>Tokenizer · chat template · KV cache <em>preallocated arenas</em></li>
       <li>Batched prompt prefill <em>up to 64 tokens per pass</em></li>
@@ -60,19 +60,19 @@
   </section>
 
   <section id="not-linux">
-    <h2><span class="secnum">02</span>What NightRun is — and is not</h2>
+    <h2><span class="secnum">02</span>What NightRun is, and is not</h2>
     <p>There is no operating system underneath the chat you see. Concretely, there is:</p>
     <ul class="plain">
       <li>no Linux kernel or userspace, no desktop environment, no browser;</li>
       <li>no background services, no package manager, no shell;</li>
-      <li>no host process "running the model" — the runtime <em>is</em> the machine's software;</li>
+      <li>no host process "running the model": the runtime <em>is</em> the machine's software;</li>
       <li>no network stack, and therefore no cloud dependency of any kind.</li>
     </ul>
     <p>
-      Equally honestly: NightRun <strong>remains a UEFI Boot Services application</strong> for its
+      Equally plainly: NightRun <strong>remains a UEFI Boot Services application</strong> for its
       entire session. It never calls <code>ExitBootServices()</code>. That is an intentional
-      compatibility decision — UEFI is used as firmware platform support, not as an operating
-      system — and it is fundamentally different from booting Linux to run a program. But it also
+      compatibility decision (UEFI is used as firmware platform support, not as an operating
+      system) and it is fundamentally different from booting Linux to run a program. But it also
       means NightRun does not claim post-<code>ExitBootServices()</code> purity. The next section
       explains the tradeoff.
     </p>
@@ -82,15 +82,15 @@
     <h2><span class="secnum">03</span>Why UEFI-resident?</h2>
     <p>Staying on Boot Services buys four hard things at zero driver-development cost:</p>
     <ul class="plain">
-      <li><strong>Graphics</strong> — the GOP framebuffer works on any UEFI machine, in whatever mode the firmware negotiated with the display.</li>
-      <li><strong>Keyboards</strong> — USB HID via the firmware's own USB stack; writing a bare-metal xHCI + HID stack is a project in itself.</li>
-      <li><strong>Storage</strong> — the FAT filesystem driver reads the model off the boot medium; NightRun only needs it until the model is resident.</li>
-      <li><strong>Multicore</strong> — the UEFI MP services protocol starts every core into NightRun's worker pool.</li>
+      <li><strong>Graphics</strong>: the GOP framebuffer works on any UEFI machine, in whatever mode the firmware negotiated with the display.</li>
+      <li><strong>Keyboards</strong>: USB HID via the firmware's own USB stack; writing a bare-metal xHCI + HID stack is a project in itself.</li>
+      <li><strong>Storage</strong>: the FAT filesystem driver reads the model off the boot medium; NightRun only needs it until the model is resident.</li>
+      <li><strong>Multicore</strong>: the UEFI MP services protocol starts every core into NightRun's worker pool.</li>
     </ul>
     <p>
       The accepted tradeoffs: firmware code stays mapped, timers and event infrastructure remain
       the firmware's, and true ownership of the MMU/interrupts is out of scope. One strict internal
-      rule keeps the model honest: <strong>worker cores never call firmware services</strong> —
+      rule keeps the runtime disciplined: <strong>worker cores never call firmware services</strong>;
       they run pure compute on atomics. And after the model loads, the storage path is sealed at
       the runtime level: any later disk access is a hard fault, by design. A
       post-<code>ExitBootServices()</code> backend would be an interesting research direction; it
@@ -104,9 +104,9 @@
       <li>Firmware loads BOOTX64.EFI / BOOTAA64.EFI</li>
       <li>SIMD state enabled <em>x86: CR4/XCR0 dance for AVX · ARM: FP/SIMD un-trapped at EL2</em></li>
       <li>Graphics + keyboard up <em>panic handler gets its own framebuffer screen</em></li>
-      <li>All cores started <em>MP services → lock-free worker pool</em></li>
+      <li>All cores started <em>MP services, then the lock-free worker pool</em></li>
       <li>RAM discovered <em>conventional-memory scan</em></li>
-      <li>Model streams into RAM <em>16 MB chunks; CRC-32 computed inline — no second pass</em></li>
+      <li>Model streams into RAM <em>16 MB chunks; CRC-32 computed inline, no second pass</em></li>
       <li>Storage sealed <em>later disk reads are a hard fault</em></li>
       <li>Tokenizer initialized <em>byte-level BPE + the model family's chat template</em></li>
       <li>Arenas allocated <em>KV cache + all inference scratch, sized up front</em></li>
@@ -127,7 +127,7 @@
       <table>
         <thead><tr><th>Region</th><th>Contents</th><th>Notes</th></tr></thead>
         <tbody>
-          <tr><td>Model blob</td><td>weights, tokenizer payload, metadata</td><td>tensors are <strong>zero-copy views</strong> into this blob — quantized data is used in place</td></tr>
+          <tr><td>Model blob</td><td>weights, tokenizer payload, metadata</td><td>tensors are <strong>zero-copy views</strong> into this blob; quantized data is used in place</td></tr>
           <tr><td>KV cache</td><td>f16 keys/values, all layers × context</td><td>sized for the full 4096-token context up front</td></tr>
           <tr><td>Prefill workspace</td><td>batched activations (up to 64 rows)</td><td>~10–20 MB depending on model</td></tr>
           <tr><td>Decode scratch</td><td>activations, logits, quantization buffers</td><td>reused every token</td></tr>
@@ -139,7 +139,7 @@
       A single arena covers the KV cache and all scratch, sized by one function
       (<code>InferCtx::required_bytes</code>) so the runtime either has everything it will ever
       need or fails at boot with a clear message. <strong>The generation loop performs zero heap
-      allocations.</strong> After residency, the model is never read from disk again — predictable
+      allocations.</strong> After residency, the model is never read from disk again: predictable
       latency is a design goal, not an accident. <code>/clear</code> resets the conversation and
       the KV position while the weights stay resident; a fresh conversation costs nothing.
     </p>
@@ -159,7 +159,7 @@
       </div>
       <div class="card">
         <h4>Decode</h4>
-        <p>One token at a time. Matrix-vector work bounded by memory bandwidth — every weight is
+        <p>One token at a time. Matrix-vector work bounded by memory bandwidth; every weight is
         read once per token. Determines <strong>interactive speed</strong>.</p>
       </div>
     </div>
@@ -168,7 +168,7 @@
       prompt lengths are chunked (a 129-token prompt runs as 64 + 64 + 1). The batched kernels use
       4-wide register tiles that share weight loads and dequantization bookkeeping across tokens.
       The crucial property, enforced by tests: <strong>batched prefill is bit-identical to
-      sequential decode</strong> — same kernels, same operation order — so it cannot change model
+      sequential decode</strong> (same kernels, same operation order), so it cannot change model
       behavior, only speed. On 8 cores, batching took Llama prompt processing from 21 to 56 tok/s,
       within striking distance of llama.cpp on the same machine.
     </p>
@@ -179,18 +179,18 @@
     <p>
       Local CPU inference lives and dies by memory bandwidth, which is why NightRun runs
       <em>directly on quantized weights</em>. Supported tensor formats are Q8_0 (32-weight blocks),
-      Q4_K and Q6_K (256-weight super-blocks with 6-bit scale metadata) — "Q4_K_M" is a per-tensor
+      Q4_K and Q6_K (256-weight super-blocks with 6-bit scale metadata); "Q4_K_M" is a per-tensor
       dtype policy, not a single format: a Q4_K_M artifact mixes Q4_K, Q6_K and F32 tensors, and
       NightRun preserves each tensor's exact quantization through conversion.
     </p>
     <ul class="plain">
-      <li><strong>x86_64:</strong> AVX2 + FMA integer dot products (<code>maddubs</code>/<code>madd</code>), F16C for the f16 KV cache. A custom hard-float UEFI target — the standard one is soft-float, which breaks vector intrinsics.</li>
-      <li><strong>AArch64:</strong> NEON kernels with a runtime-dispatched <code>sdot</code> (FEAT_DotProd) fast path — one instruction per 16 int8 products on the Pi 5's Cortex-A76.</li>
+      <li><strong>x86_64:</strong> AVX2 + FMA integer dot products (<code>maddubs</code>/<code>madd</code>), F16C for the f16 KV cache. A custom hard-float UEFI target, because the standard one is soft-float, which breaks vector intrinsics.</li>
+      <li><strong>AArch64:</strong> NEON kernels with a runtime-dispatched <code>sdot</code> (FEAT_DotProd) fast path: one instruction per 16 int8 products on the Pi 5's Cortex-A76.</li>
       <li><strong>Scalar reference kernels</strong> exist for every format and double as the correctness oracle: the NEON kernels are constructed to be <em>bit-identical</em> to scalar (exact integer dots + replicated f32 ordering), and tests assert equality with <code>==</code>, not tolerances.</li>
-      <li>Weight matrices are dtype-tagged and dispatched once per matvec — never inside row loops. Activations are quantized once per layer into the matching format (Q8_0 or Q8_K).</li>
+      <li>Weight matrices are dtype-tagged and dispatched once per matvec, never inside row loops. Activations are quantized once per layer into the matching format (Q8_0 or Q8_K).</li>
     </ul>
     <p>
-      Nothing is ever materialized as F32 weights — a 4 GB machine simply couldn't hold it, and the
+      Nothing is ever materialized as F32 weights; a 4 GB machine simply couldn't hold it, and the
       bandwidth cost would erase the point of quantization.
     </p>
   </section>
@@ -199,7 +199,7 @@
     <h2><span class="secnum">08</span>Model format and conversion</h2>
     <ol class="flow">
       <li>GGUF artifact <em>from Hugging Face or local</em></li>
-      <li>Inspection <em>architecture, tensor dtypes, tokenizer — metadata, not filenames</em></li>
+      <li>Inspection <em>architecture, tensor dtypes, tokenizer: metadata, not filenames</em></li>
       <li>Validation <em>unsupported families rejected with a reason</em></li>
       <li>.nrm conversion <em>nrconvert; output is re-parsed and re-checksummed</em></li>
       <li>Target image <em>x86_64 GPT/ESP image or Pi 5 SD image</em></li>
@@ -212,7 +212,7 @@
       merges, special tokens, pretokenizer id, chat template id); and 64-byte-aligned tensor data.
       Two section checksums (metadata and data) let the loader verify integrity <em>while
       streaming</em>. The design goal is zero-copy: the loaded blob is the runtime's tensor
-      memory. Unsupported artifacts — hybrid Granite, MoE, unknown architectures — fail conversion
+      memory. Unsupported artifacts (hybrid Granite, MoE, unknown architectures) fail conversion
       with a diagnostic instead of failing mysteriously at boot.
     </p>
   </section>
@@ -221,38 +221,38 @@
     <h2><span class="secnum">09</span>Supported model families</h2>
     <h3>Llama 3.2</h3>
     <ul class="plain">
-      <li>Conventional decoder: RMSNorm → GQA attention → SwiGLU MLP</li>
+      <li>Conventional decoder: RMSNorm, GQA attention, SwiGLU MLP</li>
       <li>Adjacent-pair RoPE with Llama-3's long-context frequency scaling</li>
       <li>Llama-3 instruct template and pretokenizer</li>
     </ul>
     <h3>Qwen3</h3>
     <ul class="plain">
-      <li><strong>NEOX-style RoPE</strong> (half-split pairs — silently wrong output if you assume Llama's layout; caught here by reference parity)</li>
+      <li><strong>NEOX-style RoPE</strong> (half-split pairs; silently wrong output if you assume Llama's layout; caught here by reference parity)</li>
       <li>Per-head Q/K RMSNorm before rotary embedding</li>
       <li>Attention width (4096) differs from hidden width (2560)</li>
       <li>No BOS token; ChatML-style template pinned to Hugging Face's <code>apply_chat_template</code></li>
-      <li><strong>Tied output head</strong> — the artifact ships no classifier matrix; the embedding is reused, and NightRun's parity tests prove that against the reference</li>
+      <li><strong>Tied output head</strong>: the artifact ships no classifier matrix; the embedding is reused, and NightRun's parity tests prove that against the reference</li>
     </ul>
     <h3>Granite 4.1 (conventional transformer)</h3>
     <ul class="plain">
       <li>GQA, SwiGLU, RMSNorm, tied embeddings, adjacent-pair RoPE (θ = 10M)</li>
       <li>Four muP scalar multipliers (embedding, attention, residual, logits÷10) carried through the format and applied branch-free</li>
-      <li>The ÷10 logit scaling compresses top-2 gaps, making greedy near-ties measurably more common — a documented evaluation quirk, not a bug</li>
-      <li><strong>Hybrid Granite variants (SSM/MoE) are intentionally rejected at conversion</strong> — supporting them would mean a different inference architecture, not a flag</li>
+      <li>The ÷10 logit scaling compresses top-2 gaps, making greedy near-ties measurably more common; a documented evaluation quirk, not a bug</li>
+      <li><strong>Hybrid Granite variants (SSM/MoE) are intentionally rejected at conversion</strong>: supporting them would mean a different inference architecture, not a flag</li>
     </ul>
   </section>
 
   <section id="tokenizer">
     <h2><span class="secnum">10</span>Tokenizer and chat-template correctness</h2>
     <p>
-      A model that loads perfectly but tokenizes almost-correctly produces subtly broken output —
+      A model that loads perfectly but tokenizes almost-correctly produces subtly broken output,
       the hardest kind of bug to see. NightRun treats tokenization as a correctness surface equal
       to the kernels:
     </p>
     <ul class="plain">
       <li>byte-level BPE with each family's own pretokenizer regex;</li>
       <li>fixture tests generated from the official Hugging Face tokenizers (with
-          <code>split_special_tokens</code> — user text must never encode into control tokens);</li>
+          <code>split_special_tokens</code>; user text must never encode into control tokens);</li>
       <li>chat templates pinned against <code>apply_chat_template</code> output token-for-token;</li>
       <li>special-token round-trips and decode-encode identity tests.</li>
     </ul>
@@ -266,13 +266,13 @@
       <li>Tokenizer + template fixtures <em>vs Hugging Face reference</em></li>
       <li>Prefill bit-identity <em>batched == sequential, logits and KV cache, per model</em></li>
       <li>Greedy generation parity <em>token-for-token vs llama.cpp, all three families</em></li>
-      <li>QEMU end-to-end <em>scripted boots, screenshots, serial logs — x86 and AArch64</em></li>
+      <li>QEMU end-to-end <em>scripted boots, screenshots, serial logs, x86 and AArch64</em></li>
       <li>Real hardware <em>USB boot on x86; SD boot on a physical Pi 5</em></li>
       <li>Sealed-storage check <em>post-load disk reads fault, proving true RAM residency</em></li>
     </ol>
     <p>
       The parity rule is absolute: if a kernel or forward-pass change breaks token-for-token
-      agreement with llama.cpp, the change is wrong — not the fixture. That rule caught a
+      agreement with llama.cpp, the change is wrong, not the fixture. That rule caught a
       completely coherent-looking but subtly divergent Qwen implementation (the NEOX rope layout)
       before it ever shipped.
     </p>
@@ -280,15 +280,15 @@
 
   <section id="tradeoffs">
     <h2><span class="secnum">12</span>Tradeoffs and the hard parts</h2>
-    <p>Real systems have scars. A selection, honestly told:</p>
+    <p>Real systems have scars. A selection, told straight:</p>
     <ul class="plain">
       <li><strong>The soft-float trap.</strong> Rust's builtin x86_64 UEFI target is soft-float; AVX intrinsics don't even compile. NightRun ships a custom hard-float target JSON and builds core/alloc from source. (The AArch64 UEFI target, pleasantly, is hard-float out of the box.)</li>
-      <li><strong>FP/SIMD isn't yours until you take it.</strong> x86 needs the XCR0 enable dance per core; on the Pi, the firmware launches applications with FP <em>trapped</em> — the first vector instruction dies silently. QEMU masked this; real hardware taught it.</li>
-      <li><strong>Multicore has platform teeth.</strong> The ARM MP-services implementation refuses non-blocking startup after ready-to-boot; NightRun dispatches workers with a blocking call and a short timeout — PSCI can't preempt them, so "timeout" just means the workers keep running. The x86 path must keep the event-based variant, whose blocking mode would reset the workers instead.</li>
-      <li><strong>The Pi boots nothing without device trees.</strong> Its bootloader refuses to start any UEFI payload unless matching DTBs sit next to it — discovered via the bootloader's own HDMI debug log during bring-up.</li>
-      <li><strong>Someone has to spin the fan.</strong> On the Pi 5 the fan is OS-managed; with no OS it stays off. NightRun finds the RP1 over PCIe and drives the fan pin at 100% — when you can't regulate, overcool.</li>
-      <li><strong>Benchmark honesty is work.</strong> Granite's logit scaling makes greedy near-ties flip between numerically-equivalent implementations; the repo documents the top-2-gap methodology used to distinguish real bugs from legitimate divergence.</li>
-      <li><strong>The installer is deliberately paranoid.</strong> Whole-disk flashing earns a fingerprinted device identity, a two-stage confirmation with an exact typed device path, and default readback verification — because "dd to the wrong disk" is the classic self-inflicted wound of this genre.</li>
+      <li><strong>FP/SIMD isn't yours until you take it.</strong> x86 needs the XCR0 enable dance per core; on the Pi, the firmware launches applications with FP <em>trapped</em>: the first vector instruction dies silently. QEMU masked this; real hardware taught it.</li>
+      <li><strong>Multicore has platform teeth.</strong> The ARM MP-services implementation refuses non-blocking startup after ready-to-boot; NightRun dispatches workers with a blocking call and a short timeout; PSCI can't preempt them, so "timeout" just means the workers keep running. The x86 path must keep the event-based variant, whose blocking mode would reset the workers instead.</li>
+      <li><strong>The Pi boots nothing without device trees.</strong> Its bootloader refuses to start any UEFI payload unless matching DTBs sit next to it, discovered via the bootloader's own HDMI debug log during bring-up.</li>
+      <li><strong>Someone has to spin the fan.</strong> On the Pi 5 the fan is OS-managed; with no OS it stays off. NightRun finds the RP1 over PCIe and drives the fan pin at 100%: when you can't regulate, overcool.</li>
+      <li><strong>Fair benchmarks are work.</strong> Granite's logit scaling makes greedy near-ties flip between numerically-equivalent implementations; the repo documents the top-2-gap methodology used to distinguish real bugs from legitimate divergence.</li>
+      <li><strong>The installer is deliberately paranoid.</strong> Whole-disk flashing earns a fingerprinted device identity, a two-stage confirmation with an exact typed device path, and default readback verification, because "dd to the wrong disk" is the classic self-inflicted wound of this genre.</li>
     </ul>
   </section>
 
