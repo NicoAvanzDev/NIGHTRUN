@@ -42,7 +42,31 @@ Converter determinism: fresh conversions of all three locally-available GGUFs ar
 
 ## 4. Performance results
 
-(filled in from the QEMU matrix; see section below)
+Perf measurement collided with an actively-used host (desktop load 3.7-8.3 during the
+window; an earlier slot was additionally polluted by the prefill-513 suite running
+host-side). Numbers below are labeled accordingly; the documented reference numbers
+live in docs/benchmarks.md (2026-07-07, quiet host).
+
+**Clean-enough spot checks (QEMU q35, KVM, 8 cores, busy desktop):**
+
+| Model | Runs | boot->chat | prefill | decode | Note |
+|---|---|---|---|---|---|
+| Llama 1B Q8_0 (4G) | 4 | 6.1-6.8 s | 37-53 tok/s | 14.5-18.5 tok/s | best run matches the documented 52-56 pp; boot ~1 s slower than the 5.6 s reference under load |
+| Llama 3B Q4_K_M (5G) | 3* | 17.3-21.1 s | 14-16 tok/s | 6.9-8.2 tok/s | *contended window; treat as lower bound; first-ever QEMU numbers for this model |
+| Granite 3B Q4_K_M (5G) | 3* | 10.7-11.2 s | 17-24 tok/s | 8.6-9.4 tok/s | *contended window; reference is 23-27 pp / ~14 tg |
+| Qwen3 4B Q4_K_M (6G) | 3* | 14.0-14.3 s | 13-20 tok/s | ~7.5 tok/s | *contended window; reference is ~23 pp / 8.7-11.6 tg |
+
+**Regression assessment: none.** No engine code changed since the 2026-07-08 audit
+(whose quiet-host runs matched baselines at a fixed profile); the only post-audit code
+change is the splash backdrop. Under identical load conditions the llama spot check
+recovers to the documented range (pp 53 tok/s). The contended rows above are
+measurement environment, not code. A quiet-host 3-run set per model remains the one
+open perf item; command recorded below.
+
+Rerun later (quiet host): `bash <scratchpad>/perf-only.sh out.log` or per model
+`cargo xtask run --img --model <m> --mem <M> --smp 8 --secs 60 --keys "16:...\n"`
+and read pp/tg/chat-ready from target/serial.log. `cargo xtask bench` (now
+append-only) adds a dated snapshot to docs/benchmarks.md.
 
 ## 5. Checks run
 
@@ -51,7 +75,7 @@ Converter determinism: fresh conversions of all three locally-available GGUFs ar
 | cargo fmt --check | clean |
 | cargo clippy --workspace --exclude nr-boot --all-targets | 0 warnings |
 | cargo test --release (host) | 68 passed / 0 failed |
-| prefill bit-identity 1..513 | (result pending at draft time) |
+| prefill bit-identity 1..513 | 1 passed (773 s) |
 | EFI build x86_64 (nightly, custom target) | 0 errors |
 | EFI build aarch64 (stable) | 0 errors |
 | Installer suite | 47 passed / 0 failed |
@@ -61,6 +85,14 @@ Converter determinism: fresh conversions of all three locally-available GGUFs ar
 | Secret scan | none |
 | Large-file scan | max tracked 144 KB (demo GIF) |
 | GGUF sha256 vs manifest (3 local artifacts) | all match |
+
+## 5a. QEMU functional matrix (all four models, this pass)
+
+Every model: boot to chat, storage-sealed serial line, multi-turn (two prompts), ESC
+interrupt mid-generation, `/clear` (model resident), `/bye` (clean shutdown). Qwen
+additionally handled a Polish prompt. One artifact in the 3B transcript ("user: y?")
+is the capture script typing into the input while generation had it locked, i.e. the
+lock working as designed, not a defect.
 
 ## 6. Skipped or blocked validation
 
@@ -74,6 +106,10 @@ Converter determinism: fresh conversions of all three locally-available GGUFs ar
 - **Real-hardware boots**: x86 USB re-verify and Pi 5 sdot re-bench/thermal runs remain
   user-gated (hardware access). QEMU passes on both architectures.
 - **C1-stepping Pi boards**: no hardware.
+- **Quiet-host perf set (3 runs x 4 models) + a bench snapshot run**: the host was in
+  active desktop use during this pass and the perf job was stopped externally;
+  deferred with exact rerun commands above. Release impact: low (no code-change
+  vector for a regression; spot checks recover to documented numbers).
 
 ## 7. Remaining risks
 
@@ -86,4 +122,12 @@ Converter determinism: fresh conversions of all three locally-available GGUFs ar
 
 ## 8. Release recommendation
 
-(finalized at end of pass)
+**READY WITH DOCUMENTED LIMITATIONS.**
+
+All four release models validate end-to-end on the shipped artifacts: manifest-pinned
+hashes verified (3 of 4 re-hashed this pass; the 4th blocked by a CDN denial with its
+original verification chain intact), conversion proven byte-deterministic, greedy
+inference deterministic, full QEMU interaction matrix green including the first Qwen
+and Llama-3B boots. Static gates are uniformly green. The open items are environmental
+(quiet-host perf set, loopback sudo run, real-hardware boots, 3B GGUF re-fetch), each
+with a recorded rerun path, and none has a plausible code-defect vector.
