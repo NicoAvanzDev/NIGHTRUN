@@ -67,16 +67,30 @@ fn sun(surf: &mut Surface, cx: i32, horizon: i32, r: i32) {
         }
         let half = isqrt(span2 as u32) as i32;
 
-        // Stripe mask: bottom 55% of the disc, gaps grow downward.
-        let frac = ((y - top) * 1000 / (2 * r).max(1)) as u32; // 0..1000
-        if frac > 400 {
-            let t = frac - 400; // 0..~225 within the visible disc
-            let phase = t * t / 55; // quadratic -> widening bands
-            let period = 240u32;
-            let duty = 90 + t / 2; // gap portion grows toward the horizon
-            if phase % period < duty.min(200) {
-                continue;
+        // Stripe mask, walked up from the horizon: the solid disc ends in
+        // three floating bars that shrink toward the horizon, completing
+        // the classic sunset. Thicknesses are permille of the radius.
+        const SEGS: [(i32, bool); 7] = [
+            (25, true), // breathing room above the horizon line
+            (40, false), // smallest bar
+            (45, true),
+            (55, false), // middle bar
+            (52, true),
+            (75, false), // largest bar
+            (62, true), // cut between the disc and the bars; solid above
+        ];
+        let d = horizon - y; // rows above the horizon, >= 1
+        let mut acc = 0;
+        let mut in_gap = false;
+        for (perm, is_gap) in SEGS {
+            acc += (perm * r / 1000).max(2);
+            if d <= acc {
+                in_gap = is_gap;
+                break;
             }
+        }
+        if in_gap {
+            continue;
         }
 
         let c = color::gradient(theme::SUN_STOPS, ((y - top) * 1000 / (2 * r).max(1)) as u32);
