@@ -72,7 +72,7 @@ fn bench() {
             .find(|l| l.contains(pat))
             .map(|l| l.trim().to_string())
     };
-    let mut out = String::from("# NightRun benchmarks (measured)\n\n");
+    let mut out = String::from("## Bench snapshot (cargo xtask bench)\n\n");
     out.push_str("Environment: QEMU q35, KVM, `-cpu max -smp 8 -m 4G`, OVMF; ");
     out.push_str(&format!(
         "host: {} hardware threads.\nDate: {}\n\n```\n",
@@ -103,10 +103,20 @@ fn bench() {
             out.push('\n');
         }
     }
-    out.push_str("```\n\nSee docs/architecture.md for the performance discussion.\n");
+    out.push_str("```\n");
+    // benchmarks.md is a curated measurement log (Pi rows, comparisons,
+    // context-decay notes). Append a dated snapshot; never clobber it.
     std::fs::create_dir_all(root.join("docs")).unwrap();
-    std::fs::write(root.join("docs/benchmarks.md"), &out).unwrap();
-    println!("--- wrote docs/benchmarks.md:\n{out}");
+    let path = root.join("docs/benchmarks.md");
+    let mut existing = std::fs::read_to_string(&path)
+        .unwrap_or_else(|_| String::from("# NightRun benchmarks (measured)\n"));
+    if !existing.ends_with('\n') {
+        existing.push('\n');
+    }
+    existing.push_str("\n");
+    existing.push_str(&out);
+    std::fs::write(&path, &existing).unwrap();
+    println!("--- appended snapshot to docs/benchmarks.md:\n{out}");
 }
 
 /// Build nightrun.img with the given model (default models/model.nrm).

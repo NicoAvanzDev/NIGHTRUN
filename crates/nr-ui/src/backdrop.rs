@@ -71,13 +71,13 @@ fn sun(surf: &mut Surface, cx: i32, horizon: i32, r: i32) {
         // three floating bars that shrink toward the horizon, completing
         // the classic sunset. Thicknesses are permille of the radius.
         const SEGS: [(i32, bool); 7] = [
-            (25, true), // breathing room above the horizon line
+            (25, true),  // breathing room above the horizon line
             (40, false), // smallest bar
             (45, true),
             (55, false), // middle bar
             (52, true),
             (75, false), // largest bar
-            (62, true), // cut between the disc and the bars; solid above
+            (62, true),  // cut between the disc and the bars; solid above
         ];
         let d = horizon - y; // rows above the horizon, >= 1
         let mut acc = 0;
