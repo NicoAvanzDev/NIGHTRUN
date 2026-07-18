@@ -155,7 +155,7 @@ matvec -> residual -> RMSNorm -> SwiGLU MLP -> residual] -> final norm -> classi
 Prompt processing does not run token-at-a-time: `InferCtx::prefill_chunk` batches up
 to 64 prompt tokens per pass through 4-wide register-tiled kernels, and a dedicated
 test suite proves the result bit-identical to sequential decode, logits and KV cache
-both, across odd lengths from 1 to 129. Decode stays token-at-a-time, as it must.
+both, across lengths from 1 to 513 including every batch-boundary neighbor. Decode stays token-at-a-time, as it must.
 
 Family differences handled by the same engine: attention width may differ from
 hidden width (Qwen3: 32x128=4096 vs dim 2560, with dedicated q/attention-out

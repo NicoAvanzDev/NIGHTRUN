@@ -103,8 +103,8 @@ fn prefill_odd_lengths_bit_identity() {
         let layout = std::alloc::Layout::from_size_align(bytes.max(1), align).unwrap();
         unsafe { std::alloc::alloc_zeroed(layout) }
     };
-    let mut seq = nr_model::InferCtx::new(&model, 256, &mut alloc).expect("ctx");
-    let mut bat = nr_model::InferCtx::new(&model, 256, &mut alloc).expect("ctx");
+    let mut seq = nr_model::InferCtx::new(&model, 640, &mut alloc).expect("ctx");
+    let mut bat = nr_model::InferCtx::new(&model, 640, &mut alloc).expect("ctx");
 
     let mut ids: Vec<u32> = Vec::new();
     tok.encode_text(
@@ -113,12 +113,12 @@ fn prefill_odd_lengths_bit_identity() {
          carried night workers home through tunnels of sodium light.",
         &mut ids,
     );
-    while ids.len() < 129 {
+    while ids.len() < 513 {
         let extend: Vec<u32> = ids.clone();
         ids.extend(extend);
     }
 
-    for &len in &[1usize, 7, 15, 17, 31, 33, 63, 65, 129] {
+    for &len in &[1usize, 7, 15, 17, 31, 33, 63, 65, 127, 128, 129, 255, 257, 511, 512, 513] {
         let prompt = &ids[..len];
         seq.reset();
         let mut seq_logits: Vec<f32> = Vec::new();
