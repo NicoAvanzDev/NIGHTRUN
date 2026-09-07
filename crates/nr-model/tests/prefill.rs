@@ -84,11 +84,6 @@ fn prefill_bit_identity_granite() {
     check_model("granite-4.1-3b-q4km.nrm");
 }
 
-#[test]
-fn prefill_bit_identity_bonsai() {
-    check_model("bonsai-8b-q1.nrm");
-}
-
 /// Spec'd odd lengths around batch boundaries: every chunking shape must
 /// stay bit-identical to sequential decode (llama artifact; lengths
 /// beyond the prompt reuse wrapped ids — token values are irrelevant to

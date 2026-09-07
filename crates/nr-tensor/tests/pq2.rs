@@ -91,3 +91,22 @@ fn rejects_partial_weight_blocks() {
 fn rejects_rows_that_split_blocks() {
     pq2::matvec(&mut [0.0; 2], &weights(1), &activations(2), 2, 64);
 }
+
+#[test]
+fn activations_keep_the_original_scale_for_rounding() {
+    let mut src = [0.0; 32];
+    src[..5].copy_from_slice(&[127.0, 0.5, 1.5, -0.5, -1.5]);
+    let mut blocks = activations(1);
+    pq2::quantize_activations(&src, &mut blocks);
+    assert_eq!(&blocks[0].qs[..5], &[127, 0, 2, 0, -2]);
+    src[..5].copy_from_slice(&[1.0, -1.0, 0.5, 0.25, -0.25]);
+    pq2::quantize_activations(&src, &mut blocks);
+    assert_eq!(&blocks[0].qs[..5], &[127, -127, 64, 32, -32]);
+    assert_eq!(
+        blocks[0].scale(),
+        nr_tensor::f16_to_f32(f32_to_f16(1.0 / 127.0))
+    );
+    pq2::quantize_activations(&[0.0; 32], &mut blocks);
+    assert_eq!(blocks[0].scale(), 0.0);
+    assert_eq!(blocks[0].qs, [0; 32]);
+}

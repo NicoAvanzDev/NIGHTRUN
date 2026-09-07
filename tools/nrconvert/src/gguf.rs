@@ -58,7 +58,6 @@ impl Value {
 // GGML tensor dtypes we understand.
 pub const GGML_F32: u32 = 0;
 pub const GGML_F16: u32 = 1;
-pub const GGML_Q1_0: u32 = 41;
 // Prism g128 has its own ID; upstream Q2_0 (42) uses incompatible g64 blocks.
 pub const GGML_PQ2_0: u32 = 142;
 pub const GGML_Q8_0: u32 = 8;
@@ -84,13 +83,6 @@ pub struct Gguf {
 
 pub fn tensor_byte_size(dtype: u32, nelem: u64) -> u64 {
     match dtype {
-        GGML_Q1_0 => {
-            assert!(
-                nelem.is_multiple_of(128),
-                "Q1_0 element count must be divisible by 128"
-            );
-            nelem / 128 * 18
-        }
         GGML_PQ2_0 => {
             assert!(
                 nelem.is_multiple_of(128),

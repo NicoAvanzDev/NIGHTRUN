@@ -81,7 +81,7 @@ cargo run --release -p nrhost -- models/model.nrm --prompt "..." [--raw] \
 - No allocations in the generation loop: model tensors are zero-copy views
   into the loaded blob; KV cache + scratch come from the boot-time arena,
   sized from `InferCtx::required_bytes` — update it when adding buffers.
-  Weight matrices are dtype-tagged (`QMat`: Q1_0/PQ2_0/Q8_0/Q4_K/Q6_K); dispatch once
+  Weight matrices are dtype-tagged (`QMat`: PQ2_0/Q8_0/Q4_K/Q6_K); dispatch once
   per matvec, never inside row loops. After the model loads, storage is
   sealed (`modelload::seal_storage`) — any later disk read is a hard fault.
 - Visual identity is centralized in `nr-gfx::theme`; screens must keep the

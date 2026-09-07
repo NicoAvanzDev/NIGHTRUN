@@ -12,8 +12,8 @@
 use alloc::vec::Vec;
 
 pub const MAGIC: [u8; 4] = *b"NRUN";
-// v4 adds Q1_0 and YaRN; v5 adds Prism PQ2_0 (g128). Layout stays fixed.
-pub const VERSION: u32 = 5;
+// v4 added YaRN; v5 added PQ2_0; v6 retires dtype 4. Layout stays fixed.
+pub const VERSION: u32 = 6;
 
 pub fn supported_version(version: u32) -> bool {
     matches!(version, 3..=VERSION)
@@ -105,7 +105,7 @@ pub enum TensorDtype {
     Q8_0 = 1,
     Q4K = 2,
     Q6K = 3,
-    Q1_0 = 4,
+    // ID 4 is retired; do not reuse it for another encoding.
     PQ2_0 = 5,
 }
 
@@ -115,10 +115,6 @@ impl TensorDtype {
     pub fn byte_size(self, n: u64) -> Option<u64> {
         match self {
             TensorDtype::F32 => n.checked_mul(4),
-            TensorDtype::Q1_0 => n
-                .is_multiple_of(128)
-                .then_some(n / 128)
-                .and_then(|b| b.checked_mul(18)),
             TensorDtype::PQ2_0 => n
                 .is_multiple_of(128)
                 .then_some(n / 128)
@@ -215,11 +211,6 @@ impl<'a> TensorView<'a> {
         unsafe {
             core::slice::from_raw_parts(self.bytes.as_ptr() as *const f32, self.bytes.len() / 4)
         }
-    }
-
-    pub fn q1(&self) -> &'a [nr_tensor::q1::BlockQ1_0] {
-        assert_eq!(self.dtype, TensorDtype::Q1_0);
-        nr_tensor::q1::cast_blocks(self.bytes)
     }
 
     pub fn pq2(&self) -> &'a [nr_tensor::pq2::BlockPQ2_0] {
@@ -410,7 +401,6 @@ impl<'a> Model<'a> {
                 1 => TensorDtype::Q8_0,
                 2 => TensorDtype::Q4K,
                 3 => TensorDtype::Q6K,
-                4 if version >= 4 => TensorDtype::Q1_0,
                 5 if version >= 5 => TensorDtype::PQ2_0,
                 _ => return Err(ParseError::BadTable),
             };
@@ -436,8 +426,7 @@ impl<'a> Model<'a> {
                 .checked_mul(cols as u64)
                 .ok_or(ParseError::BadTable)?;
             if dtype.byte_size(n) != Some(size)
-                || (matches!(dtype, TensorDtype::Q1_0 | TensorDtype::PQ2_0)
-                    && !cols.is_multiple_of(128))
+                || (dtype == TensorDtype::PQ2_0 && !cols.is_multiple_of(128))
             {
                 return Err(ParseError::BadTable);
             }

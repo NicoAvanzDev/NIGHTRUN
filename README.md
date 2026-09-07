@@ -77,7 +77,7 @@ streams from disk (there is no separate verify pass), and sealed storage afterwa
 Generation never touches the disk.
 
 **Inference.** Hand-written quantized kernels: AVX2+FMA+F16C on x86_64, NEON on the Pi,
-scalar reference implementations kept for both. Q1_0, PQ2_0, Q8_0, Q4_K and Q6_K weights are used in
+scalar reference implementations kept for both. PQ2_0, Q8_0, Q4_K and Q6_K weights are used in
 place, no dequantized copies. Prompt processing is batched (up to 64 tokens per pass) and
 proven bit-identical to token-at-a-time decode. The generation loop allocates nothing.
 
@@ -115,8 +115,8 @@ Three model families are implemented, each with its real quirks handled faithful
   header (embedding, attention, residual, logit). Hybrid SSM/MoE Granite variants are
   rejected at conversion with a named reason, not mangled at runtime.
 
-Any GGUF whose tensors use Q1_0, PQ2_0, Q8_0, Q4_K, Q6_K or F32 converts with each tensor's exact
-dtype preserved, so Q1_0, PQ2_0, Q8_0, Q4_K_M, Q4_K_S and Q6_K builds of these families all work.
+Any GGUF whose tensors use PQ2_0, Q8_0, Q4_K, Q6_K or F32 converts with each tensor's exact
+dtype preserved, so PQ2_0, Q8_0, Q4_K_M, Q4_K_S and Q6_K builds of these families all work.
 
 [Ternary Bonsai 8B](https://huggingface.co/prism-ml/Ternary-Bonsai-8B-gguf) is published by PrismML
 and uses Qwen3 architecture. Select it in `./install.sh`, or convert the official

@@ -89,7 +89,7 @@ The chat screen cannot appear unless the whole chain succeeded.
 ## .nrm model format
 
 Produced by `tools/nrconvert` from a GGUF. Little-endian, fixed 192-byte header:
-magic `NRUN`, version (5; v3/v4 remain readable), arch id (llama3 / qwen3 / granite), dims (dim / layers /
+magic `NRUN`, version (6; v3-v5 supported dtypes remain readable), arch id (llama3 / qwen3 / granite), dims (dim / layers /
 heads / kv heads / head_dim / ffn / vocab / ctx), rope theta + Llama-3 scaling
 params, flags (tied embeddings / YaRN), four muP-style scalars, display name, then offsets
 for the tokenizer blob, the tensor table (32-byte entries: kind, layer, dtype,
@@ -104,7 +104,7 @@ entry by entry at parse time. An adversarial test suite (truncations, wrapped
 offsets, overflowing dimensions, misaligned tables, flipped CRC bits) pins the
 behavior: malformed files get named errors, never panics.
 
-Tensors stay in their GGUF block layouts: Q1_0 (128 sign bits + f16 scale = 18 B), PQ2_0 (128 two-bit codes + f16 scale = 34 B), Q8_0 (32 x i8 + f16 scale = 34 B), Q4_K
+Tensors stay in their GGUF block layouts: PQ2_0 (128 two-bit codes + f16 scale = 34 B), Q8_0 (32 x i8 + f16 scale = 34 B), Q4_K
 (256-value super-blocks, packed 6-bit scale/min pairs, 144 B) and Q6_K (4+2-bit
 planes, 16 signed scales, 210 B); norms in f32. "Q4_K_M" is a per-tensor policy,
 not one format, and NightRun preserves each tensor's exact source dtype.
@@ -265,16 +265,16 @@ multiplied by the scale; the reserved code 3 decodes to +2. This is the
 unambiguous g128 replacement for Prism's original Q2_0 file. Upstream Q2_0
 (dtype 42) uses g64 blocks and is deliberately rejected by the converter.
 Ternary weights carry 1.58 bits of information; this lossless packing uses
-2.125 bits per weight including scales. Earlier binary Q1_0 files remain
-supported (GGML dtype 41, 18-byte blocks of 128 sign bits plus f16 scale).
+2.125 bits per weight including scales.
 
 Scalar, AVX2 and NEON kernels multiply the packed weights directly by four
-Q8_0 activation blocks. Both Bonsai variants use ggml's original f32 maximum
+Q8_0 activation blocks. Ternary Bonsai uses ggml's original f32 maximum
 and ties-to-even activation rounding. Decode and batched prefill share the
 same dot accumulation order and require no new activation scratch buffers.
 
-The v5 `.nrm` header retains its 192-byte layout and adds dtype 5 for PQ2_0;
-v3 and v4 files remain readable. V4 introduced dtype 4 for Q1_0 and YaRN.
+The v6 `.nrm` header retains its 192-byte layout and the v5 dtype 5 for
+PQ2_0. Supported dtypes in v3-v5 files remain readable; retired dtype 4 is
+rejected and is never reassigned. V4 introduced YaRN.
 Flag bit 1 selects YaRN: the existing rope factor/low/high/original-context
 slots carry factor 4, beta_fast 32, beta_slow 1, and original context 16384.
 Offset 164 carries the RoPE magnitude multiplier (1 for this artifact).

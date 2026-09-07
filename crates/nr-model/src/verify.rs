@@ -46,7 +46,7 @@ impl StreamingVerifier {
         if !supported_version(u32at(4)) {
             return Err(VerifyError::BadHeader);
         }
-        // Offsets per format v3/v4/v5 layout (see nr-model::format).
+        // Offsets per format v3-v6 layout (see nr-model::format).
         let tok_off = u64at(136) as usize;
         let tok_size = u64at(144) as usize;
         let table_off = u64at(152) as usize;

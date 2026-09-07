@@ -2,9 +2,7 @@
 //! Codes 0/1/2/3 map to -1/0/+1/+2 times the scale. Dots use four Q8_0
 //! activation blocks per weight block; weights always stay packed.
 
-use crate::f16::f16_to_f32;
-
-pub use crate::q1::quantize_activations;
+use crate::f16::{f16_to_f32, f32_to_f16};
 use crate::q8::{BlockQ8_0, QK8_0};
 
 pub const PQK2_0: usize = 128;
@@ -26,6 +24,21 @@ pub fn cast_blocks(bytes: &[u8]) -> &[BlockPQ2_0] {
             bytes.as_ptr().cast(),
             bytes.len() / core::mem::size_of::<BlockPQ2_0>(),
         )
+    }
+}
+
+/// Q8_0 activations for the PQ2_0 kernels. Match ggml's SIMD quantizer:
+/// quantize against the original f32 maximum, then store an f16 scale.
+/// The older Q8-weight path intentionally keeps its existing numerics.
+pub fn quantize_activations(src: &[f32], out: &mut [BlockQ8_0]) {
+    assert_eq!(src.len(), out.len() * QK8_0);
+    for (block, chunk) in out.iter_mut().zip(src.as_chunks::<QK8_0>().0) {
+        let amax = chunk.iter().fold(0f32, |m, v| m.max(v.abs()));
+        block.d = f32_to_f16(amax / 127.0);
+        let inv = if amax == 0.0 { 0.0 } else { 127.0 / amax };
+        for (q, &v) in block.qs.iter_mut().zip(chunk) {
+            *q = libm::rintf(v * inv) as i8;
+        }
     }
 }
 
