@@ -92,9 +92,9 @@ fn reseal(b: &mut [u8]) {
 
 fn tiny_pq2_nrm() -> Vec<u8> {
     let mut b = tiny_nrm();
-    b[4..8].copy_from_slice(&5u32.to_le_bytes());
+    b[4..8].copy_from_slice(&4u32.to_le_bytes());
     let tab = u64::from_le_bytes(b[152..160].try_into().unwrap()) as usize;
-    b[tab + 4..tab + 6].copy_from_slice(&5u16.to_le_bytes());
+    b[tab + 4..tab + 6].copy_from_slice(&4u16.to_le_bytes());
     b[tab + 16..tab + 24].copy_from_slice(&68u64.to_le_bytes());
     b[tab + 24..tab + 28].copy_from_slice(&2u32.to_le_bytes());
     b[tab + 28..tab + 32].copy_from_slice(&128u32.to_le_bytes());
@@ -115,10 +115,7 @@ fn pq2_layout_and_legacy_versions() {
     assert_eq!(TensorDtype::PQ2_0.byte_size(u64::MAX), None);
     assert!(nr_model::verify::StreamingVerifier::new(&b).is_ok());
     assert!(nr_model::verify::StreamingVerifier::new(&tiny_nrm()).is_ok());
-    let mut legacy = b.clone();
-    legacy[4..8].copy_from_slice(&4u32.to_le_bytes());
-    reseal(&mut legacy);
-    assert!(matches!(Model::parse(&legacy), Err(ParseError::BadTable)));
+    let mut legacy = b;
     legacy[4..8].copy_from_slice(&3u32.to_le_bytes());
     reseal(&mut legacy);
     assert!(matches!(Model::parse(&legacy), Err(ParseError::BadTable)));
@@ -136,23 +133,6 @@ fn rejects_pq2_partial_rows_and_wrong_sizes() {
         } else {
             b[tab + 16..tab + 24].copy_from_slice(&67u64.to_le_bytes());
         }
-        reseal(&mut b);
-        assert!(matches!(Model::parse(&b), Err(ParseError::BadTable)));
-    }
-}
-
-#[test]
-fn retired_dtype_is_rejected() {
-    // The old ID must never be interpreted as ternary weights, even in
-    // an otherwise valid file with matching tensor sizes and checksums.
-    for version in [3, 4, 5, nr_model::format::VERSION] {
-        let mut b = tiny_nrm();
-        b[4..8].copy_from_slice(&version.to_le_bytes());
-        let tab = u64::from_le_bytes(b[152..160].try_into().unwrap()) as usize;
-        b[tab + 4..tab + 6].copy_from_slice(&4u16.to_le_bytes());
-        b[tab + 16..tab + 24].copy_from_slice(&36u64.to_le_bytes());
-        b[tab + 24..tab + 28].copy_from_slice(&2u32.to_le_bytes());
-        b[tab + 28..tab + 32].copy_from_slice(&128u32.to_le_bytes());
         reseal(&mut b);
         assert!(matches!(Model::parse(&b), Err(ParseError::BadTable)));
     }

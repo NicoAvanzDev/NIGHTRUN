@@ -12,11 +12,11 @@
 use alloc::vec::Vec;
 
 pub const MAGIC: [u8; 4] = *b"NRUN";
-// v4 added YaRN; v5 added PQ2_0; v6 retires dtype 4. Layout stays fixed.
-pub const VERSION: u32 = 6;
+// v4 adds PQ2_0 and YaRN; header size and existing dtype IDs stay fixed.
+pub const VERSION: u32 = 4;
 
 pub fn supported_version(version: u32) -> bool {
-    matches!(version, 3..=VERSION)
+    matches!(version, 3 | VERSION)
 }
 pub const HEADER_SIZE: usize = 192;
 pub const NAME_LEN: usize = 48;
@@ -105,8 +105,7 @@ pub enum TensorDtype {
     Q8_0 = 1,
     Q4K = 2,
     Q6K = 3,
-    // ID 4 is retired; do not reuse it for another encoding.
-    PQ2_0 = 5,
+    PQ2_0 = 4,
 }
 
 impl TensorDtype {
@@ -401,7 +400,7 @@ impl<'a> Model<'a> {
                 1 => TensorDtype::Q8_0,
                 2 => TensorDtype::Q4K,
                 3 => TensorDtype::Q6K,
-                5 if version >= 5 => TensorDtype::PQ2_0,
+                4 if version >= 4 => TensorDtype::PQ2_0,
                 _ => return Err(ParseError::BadTable),
             };
             let _pad = tc.u16();

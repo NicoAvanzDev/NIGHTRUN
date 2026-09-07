@@ -89,7 +89,7 @@ The chat screen cannot appear unless the whole chain succeeded.
 ## .nrm model format
 
 Produced by `tools/nrconvert` from a GGUF. Little-endian, fixed 192-byte header:
-magic `NRUN`, version (6; v3-v5 supported dtypes remain readable), arch id (llama3 / qwen3 / granite), dims (dim / layers /
+magic `NRUN`, version (4; v3 remains readable), arch id (llama3 / qwen3 / granite), dims (dim / layers /
 heads / kv heads / head_dim / ffn / vocab / ctx), rope theta + Llama-3 scaling
 params, flags (tied embeddings / YaRN), four muP-style scalars, display name, then offsets
 for the tokenizer blob, the tensor table (32-byte entries: kind, layer, dtype,
@@ -272,9 +272,8 @@ Q8_0 activation blocks. Ternary Bonsai uses ggml's original f32 maximum
 and ties-to-even activation rounding. Decode and batched prefill share the
 same dot accumulation order and require no new activation scratch buffers.
 
-The v6 `.nrm` header retains its 192-byte layout and the v5 dtype 5 for
-PQ2_0. Supported dtypes in v3-v5 files remain readable; retired dtype 4 is
-rejected and is never reassigned. V4 introduced YaRN.
+The v4 `.nrm` header retains its 192-byte layout and adds dtype 4 for PQ2_0
+and YaRN metadata. V3 files retain their original semantics and remain readable.
 Flag bit 1 selects YaRN: the existing rope factor/low/high/original-context
 slots carry factor 4, beta_fast 32, beta_slow 1, and original context 16384.
 Offset 164 carries the RoPE magnitude multiplier (1 for this artifact).
