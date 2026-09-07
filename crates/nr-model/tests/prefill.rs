@@ -138,3 +138,8 @@ fn prefill_odd_lengths_bit_identity() {
         assert_eq!(seq.pos, bat.pos, "len {len}: position diverges");
     }
 }
+
+#[test]
+fn prefill_bit_identity_ternary_bonsai() {
+    check_model("ternary-bonsai-8b-pq2.nrm");
+}

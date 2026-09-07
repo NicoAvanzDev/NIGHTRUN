@@ -59,6 +59,8 @@ impl Value {
 pub const GGML_F32: u32 = 0;
 pub const GGML_F16: u32 = 1;
 pub const GGML_Q1_0: u32 = 41;
+// Prism g128 has its own ID; upstream Q2_0 (42) uses incompatible g64 blocks.
+pub const GGML_PQ2_0: u32 = 142;
 pub const GGML_Q8_0: u32 = 8;
 pub const GGML_Q4_K: u32 = 12;
 pub const GGML_Q5_K: u32 = 13;
@@ -89,12 +91,22 @@ pub fn tensor_byte_size(dtype: u32, nelem: u64) -> u64 {
             );
             nelem / 128 * 18
         }
+        GGML_PQ2_0 => {
+            assert!(
+                nelem.is_multiple_of(128),
+                "PQ2_0 element count must be divisible by 128"
+            );
+            nelem / 128 * 34
+        }
         GGML_F32 => nelem * 4,
         GGML_F16 => nelem * 2,
         GGML_Q8_0 => nelem / 32 * 34,
         GGML_Q4_K => nelem / 256 * 144,
         GGML_Q5_K => nelem / 256 * 176,
         GGML_Q6_K => nelem / 256 * 210,
+        42 => panic!(
+            "GGML Q2_0 (42) has incompatible g64/g128 variants; use PrismML's Ternary-Bonsai-8B-PQ2_0.gguf (dtype 142, g128)"
+        ),
         _ => panic!("unsupported ggml dtype {dtype}"),
     }
 }

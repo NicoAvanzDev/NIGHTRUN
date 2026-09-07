@@ -13,6 +13,7 @@ pub mod kquant;
 #[cfg(target_arch = "aarch64")]
 pub mod neon;
 pub mod parallel;
+pub mod pq2;
 pub mod q1;
 pub mod q8;
 pub mod rope;

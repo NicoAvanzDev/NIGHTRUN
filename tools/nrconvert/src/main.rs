@@ -1,4 +1,4 @@
-//! nrconvert: GGUF (Q1_0 / Q8_0 / Q4_K / Q6_K) -> NightRun .nrm converter.
+//! nrconvert: GGUF (Q1_0 / PQ2_0 / Q8_0 / Q4_K / Q6_K) -> NightRun .nrm converter.
 //!
 //! Usage: nrconvert <input.gguf> <output.nrm>
 
@@ -8,7 +8,9 @@ mod tokenizer;
 use nr_model::crc32::Crc32;
 use nr_model::format::{self, TensorDtype, TensorKind};
 
-use crate::gguf::{Gguf, TensorInfo, GGML_F32, GGML_Q1_0, GGML_Q4_K, GGML_Q6_K, GGML_Q8_0};
+use crate::gguf::{
+    Gguf, TensorInfo, GGML_F32, GGML_PQ2_0, GGML_Q1_0, GGML_Q4_K, GGML_Q6_K, GGML_Q8_0,
+};
 
 fn kv_u32(g: &Gguf, key: &str) -> u32 {
     g.kv.get(key)
@@ -27,6 +29,7 @@ fn kv_f32(g: &Gguf, key: &str) -> f32 {
 fn quant_label(g: &Gguf) -> &'static str {
     match g.kv.get("general.file_type").and_then(gguf::Value::as_u32) {
         Some(40) => "Q1_0",
+        Some(141) => "PQ2_0",
         Some(7) => "Q8_0",
         Some(14) => "Q4_K_S",
         Some(15) => "Q4_K_M",
@@ -52,6 +55,7 @@ fn ggml_dtype_name(t: u32) -> String {
         0 => "F32".into(),
         1 => "F16".into(),
         GGML_Q1_0 => "Q1_0".into(),
+        GGML_PQ2_0 => "PQ2_0".into(),
         8 => "Q8_0".into(),
         12 => "Q4_K".into(),
         13 => "Q5_K".into(),
@@ -235,19 +239,20 @@ fn main() {
         let dtype = match t.dtype {
             GGML_F32 => TensorDtype::F32,
             GGML_Q1_0 => TensorDtype::Q1_0,
+            GGML_PQ2_0 => TensorDtype::PQ2_0,
             GGML_Q8_0 => TensorDtype::Q8_0,
             GGML_Q4_K => TensorDtype::Q4K,
             GGML_Q6_K => TensorDtype::Q6K,
             other => panic!(
-                "{}: unsupported dtype {other} (supported: F32, Q1_0, Q8_0, Q4_K, Q6_K)",
+                "{}: unsupported dtype {other} (supported: F32, Q1_0, PQ2_0, Q8_0, Q4_K, Q6_K)",
                 t.name
             ),
         };
         let cols = t.dims[0] as u32;
         let rows = t.dims.get(1).copied().unwrap_or(1) as u32;
         assert!(
-            dtype != TensorDtype::Q1_0 || cols.is_multiple_of(128),
-            "{}: Q1_0 row width must be divisible by 128",
+            !matches!(dtype, TensorDtype::Q1_0 | TensorDtype::PQ2_0) || cols.is_multiple_of(128),
+            "{}: Q1_0/PQ2_0 row width must be divisible by 128",
             t.name
         );
         out.push(OutTensor {
@@ -423,10 +428,21 @@ fn main() {
     for v in [embed_scale, attn_scale, residual_scale, logit_scale] {
         header.extend_from_slice(&v.to_bits().to_le_bytes());
     }
+    // Ternary Bonsai omits general.name, but still provides its identity
+    // in general.basename and general.size_label for the chat heading.
+    let fallback_name = ["general.basename", "general.size_label"]
+        .iter()
+        .filter_map(|key| g.kv.get(*key).and_then(gguf::Value::as_str))
+        .collect::<Vec<_>>()
+        .join(" ");
     let base_name =
         g.kv.get("general.name")
             .and_then(gguf::Value::as_str)
-            .unwrap_or("Unknown Model");
+            .unwrap_or(if fallback_name.is_empty() {
+                "Unknown Model"
+            } else {
+                &fallback_name
+            });
     let name = format!("{base_name} {}", quant_label(&g));
     let mut name_bytes = [0u8; format::NAME_LEN];
     let n = name.len().min(format::NAME_LEN);

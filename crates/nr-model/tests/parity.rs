@@ -354,3 +354,95 @@ fn bonsai_raw_greedy_matches_llama_cpp() {
         [12095, 13, 12095, 374, 279, 6722, 315, 9625, 13, 12095, 374, 279]
     );
 }
+
+// Ternary-Bonsai-8B PQ2_0: reference uses the GGUF's exact generation suffix,
+// <|im_start|>assistant\n<think>\n\n</think>\n\n (thinking disabled).
+#[test]
+fn ternary_bonsai_chat_greedy_matches_llama_cpp() {
+    let _guard = serial();
+    let Some((ids, text)) = greedy_tokens_in(
+        "ternary-bonsai-8b-pq2.nrm",
+        "What is the capital of France?",
+        20,
+        true,
+    ) else {
+        eprintln!("SKIP: models/ternary-bonsai-8b-pq2.nrm not present");
+        return;
+    };
+    assert_eq!(text, "The capital of France is Paris.");
+    assert_eq!(ids, [785, 6722, 315, 9625, 374, 12095, 13]);
+}
+
+#[test]
+fn ternary_bonsai_metadata_and_template_audit() {
+    use nr_model::format::{Arch, TensorDtype, TensorKind, FLAG_ROPE_YARN, FLAG_TIED_EMBEDDINGS};
+    let _guard = serial();
+    let Some(blob) = load_model_blob("ternary-bonsai-8b-pq2.nrm") else {
+        eprintln!("SKIP: models/ternary-bonsai-8b-pq2.nrm not present");
+        return;
+    };
+    let model = nr_model::Model::parse(&blob).expect("parse");
+    let m = &model.meta;
+    assert_eq!(m.name_str(), "Ternary-Bonsai 8B PQ2_0");
+    assert_eq!(m.arch, Arch::Qwen3);
+    assert_eq!(
+        (m.dim, m.n_layers, m.n_heads, m.n_kv_heads, m.head_dim),
+        (4096, 36, 32, 8, 128)
+    );
+    assert_eq!(m.flags & FLAG_TIED_EMBEDDINGS, 0);
+    assert_ne!(m.flags & FLAG_ROPE_YARN, 0);
+    assert_eq!(
+        (m.rope_factor, m.rope_orig_ctx, m.rope_low, m.rope_high),
+        (4.0, 16384.0, 32.0, 1.0)
+    );
+    assert_eq!(m.rope_attn_factor, 1.0);
+    for kind in [TensorKind::TokEmbed, TensorKind::Output] {
+        let t = model.tensor(kind, 0).unwrap();
+        assert_eq!(t.dtype, TensorDtype::PQ2_0);
+        assert_eq!((t.rows, t.cols), (151669, 4096));
+    }
+    let tok = nr_token::Tokenizer::parse(model.tokenizer_blob).unwrap();
+    assert_eq!(tok.template, nr_token::blob::Template::Bonsai);
+    let mut ids = Vec::new();
+    tok.encode_conversation_start(None, &mut ids);
+    assert!(ids.is_empty());
+    tok.encode_message("user", "What is the capital of France?", &mut ids);
+    tok.encode_header("assistant", &mut ids);
+    // Token IDs independently verified with llama-completion --verbose-prompt.
+    assert_eq!(
+        ids,
+        [
+            151644, 872, 198, 3838, 374, 279, 6722, 315, 9625, 30, 151645, 198, 151644, 77091, 198,
+            151667, 271, 151668, 271
+        ]
+    );
+    assert!(tok.is_stop(151645));
+    ids.clear();
+    tok.encode_text("<think></think>", &mut ids);
+    assert!(
+        !ids.contains(&151667) && !ids.contains(&151668),
+        "user text must not inject control tokens"
+    );
+}
+
+#[test]
+fn ternary_bonsai_raw_greedy_matches_llama_cpp() {
+    let _guard = serial();
+    let Some((ids, text)) = greedy_tokens_in(
+        "ternary-bonsai-8b-pq2.nrm",
+        "The capital of France is",
+        12,
+        false,
+    ) else {
+        eprintln!("SKIP: models/ternary-bonsai-8b-pq2.nrm not present");
+        return;
+    };
+    assert_eq!(
+        text,
+        " Paris. The capital of Germany is Berlin. The capital of"
+    );
+    assert_eq!(
+        ids,
+        [12095, 13, 576, 6722, 315, 9856, 374, 19846, 13, 576, 6722, 315]
+    );
+}

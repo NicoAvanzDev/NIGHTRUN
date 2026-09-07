@@ -3,6 +3,8 @@
 //! Commands:
 //!   cargo xtask build                       build BOOTX64.EFI and stage the ESP dir
 //!   cargo xtask run [opts]                  boot the staged ESP in QEMU + OVMF
+//!     --img               boot the disk image, keeping its selected model
+//!     --model <file.nrm>   explicitly select the model for --img
 //!     --window            show a display window (default: headless)
 //!     --mem <size>        guest RAM (default 2G)
 //!     --secs <n>          quit QEMU after n seconds
@@ -10,6 +12,8 @@
 //!     --keys <t>:<text>   type text at t seconds (repeatable; "\n" = Enter)
 
 mod image;
+#[cfg(test)]
+mod tests;
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -54,7 +58,7 @@ fn bench() {
         &[
             "--img",
             "--mem",
-            "4G",
+            "6G",
             "--smp",
             "8",
             "--secs",
@@ -73,7 +77,7 @@ fn bench() {
             .map(|l| l.trim().to_string())
     };
     let mut out = String::from("## Bench snapshot (cargo xtask bench)\n\n");
-    out.push_str("Environment: QEMU q35, KVM, `-cpu max -smp 8 -m 4G`, OVMF; ");
+    out.push_str("Environment: QEMU q35, KVM, `-cpu max -smp 8 -m 6G`, OVMF; ");
     out.push_str(&format!(
         "host: {} hardware threads.\nDate: {}\n\n```\n",
         std::thread::available_parallelism()
@@ -113,23 +117,50 @@ fn bench() {
     if !existing.ends_with('\n') {
         existing.push('\n');
     }
-    existing.push_str("\n");
+    existing.push('\n');
     existing.push_str(&out);
     std::fs::write(&path, &existing).unwrap();
     println!("--- appended snapshot to docs/benchmarks.md:\n{out}");
 }
 
-/// Build nightrun.img with the given model (default models/model.nrm).
-/// When `fresh` is false and the image already contains this exact model,
-/// only BOOTX64.EFI is refreshed.
+/// Build an image, or refresh its EFI for `run --img`. Without an explicit
+/// model, running an existing image preserves the model already inside it.
 fn build_image(fresh: bool, model_arg: Option<&str>, arch: Arch) -> PathBuf {
     let root = root();
     let (_, efi) = build_and_stage(arch);
+    prepare_image(&root, &efi, fresh, model_arg, arch)
+}
+
+fn prepare_image(
+    root: &Path,
+    efi: &Path,
+    fresh: bool,
+    model_arg: Option<&str>,
+    arch: Arch,
+) -> PathBuf {
     let img = root.join(match arch {
         Arch::X86 => "nightrun.img",
         Arch::Aarch64 => "nightrun-aarch64.img",
     });
+    if !fresh && model_arg.is_none() && img.exists() {
+        assert!(
+            image::update_efi(&img, efi, arch.boot_file()),
+            "could not refresh {}; rebuild with cargo xtask image --model <file.nrm>",
+            img.display()
+        );
+        println!(
+            "updated {} in {} (keeping its model)",
+            arch.boot_file(),
+            img.display()
+        );
+        return img;
+    }
     let model = root.join(model_arg.unwrap_or("models/model.nrm"));
+    assert!(
+        model_arg.is_none() || model.is_file(),
+        "model file missing: {}",
+        model.display()
+    );
     let model = model.exists().then_some(model);
     if model.is_none() {
         println!("note: model file missing - building image without model");
@@ -152,11 +183,11 @@ fn build_image(fresh: bool, model_arg: Option<&str>, arch: Arch) -> PathBuf {
         .map(|s| s == stamp)
         .unwrap_or(false);
 
-    if !fresh && same_model && img.exists() && image::update_efi(&img, &efi, arch.boot_file()) {
+    if !fresh && same_model && img.exists() && image::update_efi(&img, efi, arch.boot_file()) {
         println!("updated {} in {}", arch.boot_file(), img.display());
         return img;
     }
-    image::build(&img, &efi, model.as_deref(), arch.boot_file());
+    image::build(&img, efi, model.as_deref(), arch.boot_file());
     let _ = std::fs::write(&sidecar, stamp);
     img
 }

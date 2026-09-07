@@ -25,7 +25,7 @@ nr_build_image() {
         case "$NR_MODEL_ID" in
             llama-1b)   nrm="$NR_ROOT/models/model.nrm" ;;
             granite-3b) nrm="$NR_ROOT/models/granite-4.1-3b-q4km.nrm" ;;
-            bonsai-8b)  nrm="$NR_ROOT/models/bonsai-8b-q1.nrm" ;;
+            bonsai-8b)  nrm="$NR_ROOT/models/ternary-bonsai-8b-pq2.nrm" ;;
             qwen3-4b)   nrm="$NR_ROOT/models/qwen3-4b-q4km.nrm" ;;
             *)          nrm="$NR_ROOT/models/${NR_MODEL_ID}.nrm" ;;
         esac

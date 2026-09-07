@@ -62,7 +62,7 @@ size_bytes license gated min_ram_gb targets nrm_bytes min_media_gb blurb`.
 the sha256 (`x-linked-etag`, or sha256sum after a manual download), and
 run `scripts/installer/tests/run.sh` (it validates required fields).
 The family must be one NightRun supports (llama, qwen3, dense granite);
-Bonsai 8B is a Qwen3 model with Q1_0 weights.
+Ternary Bonsai 8B is a Qwen3 model with PQ2_0 weights.
 `nrconvert --inspect` is the gatekeeper at run time regardless.
 
 ## Downloads and verification
