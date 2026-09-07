@@ -5,9 +5,9 @@ local LLM chat. This file is the engineering reference: what runs where, why the
 decisions went the way they did, and which mistakes already got caught by the test
 suite so you don't repeat them.
 
-Four models ship in the catalog across three model families: Llama 3.2 1B Instruct
-(Q8_0), Llama 3.2 3B Instruct (Q4_K_M), Granite 4.1 3B (Q4_K_M, dense transformer)
-and Qwen3-4B-Instruct-2507 (Q4_K_M). One model per image
+Five models ship in the catalog across three model families: Llama 3.2 1B Instruct
+(Q8_0), Llama 3.2 3B Instruct (Q4_K_M), Granite 4.1 3B (Q4_K_M, dense transformer),
+Qwen3-4B-Instruct-2507 (Q4_K_M), and PrismML Bonsai 8B (Q1_0). One model per image
 (`cargo xtask image --model <file.nrm>`).
 
 Scope note: NightRun supports the conventional dense transformer variant of Granite
@@ -89,9 +89,9 @@ The chat screen cannot appear unless the whole chain succeeded.
 ## .nrm model format
 
 Produced by `tools/nrconvert` from a GGUF. Little-endian, fixed 192-byte header:
-magic `NRUN`, version (3), arch id (llama3 / qwen3 / granite), dims (dim / layers /
+magic `NRUN`, version (4; v3 remains readable), arch id (llama3 / qwen3 / granite), dims (dim / layers /
 heads / kv heads / head_dim / ffn / vocab / ctx), rope theta + Llama-3 scaling
-params, flags (tied embeddings), four muP-style scalars, display name, then offsets
+params, flags (tied embeddings / YaRN), four muP-style scalars, display name, then offsets
 for the tokenizer blob, the tensor table (32-byte entries: kind, layer, dtype,
 offset, size, rows, cols) and the 64-byte-aligned data section. CRC32 over metadata
 and data, verified while the file streams in. Parsing on bare metal is header reads
@@ -104,7 +104,7 @@ entry by entry at parse time. An adversarial test suite (truncations, wrapped
 offsets, overflowing dimensions, misaligned tables, flipped CRC bits) pins the
 behavior: malformed files get named errors, never panics.
 
-Tensors stay in their GGUF block layouts: Q8_0 (32 x i8 + f16 scale = 34 B), Q4_K
+Tensors stay in their GGUF block layouts: Q1_0 (128 sign bits + f16 scale = 18 B), Q8_0 (32 x i8 + f16 scale = 34 B), Q4_K
 (256-value super-blocks, packed 6-bit scale/min pairs, 144 B) and Q6_K (4+2-bit
 planes, 16 signed scales, 210 B); norms in f32. "Q4_K_M" is a per-tensor policy,
 not one format, and NightRun preserves each tensor's exact source dtype.
@@ -123,7 +123,7 @@ The audited dtype policy of the Qwen3-4B Q4_K_M artifact: everything Q4_K except
 and the per-head Q/K norms F32. The model is tied (no `output.weight`): the Q6_K
 embedding matrix doubles as the classifier, validated by a dedicated test plus
 llama.cpp parity. The GGUF `rope_freqs` tensor (Llama-3 frequency divisors) is
-carried through and preferred at runtime when present; Qwen3 uses plain theta=5e6.
+carried through and preferred at runtime when present; the Qwen3-4B catalog model uses plain theta=5e6.
 
 ## Tokenizer
 
@@ -144,7 +144,7 @@ The blob's template field selects the chat format: Llama-3 headers
 pretokenizer differs from Llama-3's in exactly one rule (single `\p{N}` instead of
 `{1,3}`). All are fixture-tested against the official HF tokenizers and the
 templated paths against `apply_chat_template` exactly. The UI labels the assistant
-by family: `llama:`, `qwen:` or `granite:`.
+by family: `llama:`, `qwen:`, `bonsai:` or `granite:`.
 
 ## Inference
 
@@ -245,3 +245,34 @@ media safety deserves one.
 - Requires UEFI; no legacy BIOS path.
 - Firmware keyboard repeat/rollover behavior varies between vendors.
 - CPU only. Performance ceilings are memory-bandwidth ceilings.
+
+## Bonsai 8B Q1_0
+
+The catalog pins [PrismML's official GGUF](https://huggingface.co/prism-ml/Bonsai-8B-gguf)
+at `48516770dd04643643e9f9019a2a349cf26c5dbd`. Its 399 tensors include a separate
+output head; all matrices, including both embeddings and classifier, stay in Q1_0.
+The actual artifact has 151,669 vocabulary entries, 36 layers, hidden size 4096,
+32 query / 8 KV heads, head size 128, and FFN size 12288. The converted file is
+1,157,330,048 bytes. Runtime context remains bounded by the configured arena.
+
+Q1_0 uses GGML dtype 41: each block stores an f16 scale followed by 16 bytes of
+LSB-first sign bits (0 = negative, 1 = positive). Scalar, AVX2 and NEON kernels
+multiply those weights directly by four Q8_0 activation blocks. Bonsai activations
+use ggml's original f32 maximum and ties-to-even rounding; the existing Q8-weight
+path keeps its prior quantization. Decode and batched prefill share the same dot
+accumulation order, and require no new activation scratch buffers.
+
+The v4 `.nrm` header retains its 192-byte layout and adds dtype 4 for Q1_0.
+Flag bit 1 selects YaRN: the existing rope factor/low/high/original-context slots
+carry factor 4, beta_fast 32, beta_slow 1, and original context 16384. Offset 164,
+previously reserved, carries the RoPE magnitude multiplier (1 for this artifact).
+The runtime applies both YaRN's frequency ramp and its `1 + 0.1 * ln(factor)`
+magnitude correction. V3 models retain their original semantics and remain readable.
+
+NRTK v3 adds template ID 4 for Bonsai; NRTK v2 remains readable. Its otherwise
+unused ChatML BOS/end-header slots carry `</think>`/`<think>`. The generation
+header matches the GGUF's literal `assistant\n<think>\n\n</think>\n\n` suffix;
+user text still cannot encode control tokens. The first-turn prompt and greedy
+answer are pinned against llama.cpp commit
+`5202104b59ada9005db079eea43882a2b7bf5802`, using the exact rendered GGUF template,
+CPU inference, f16 KV cache, flash attention off, and temperature zero.

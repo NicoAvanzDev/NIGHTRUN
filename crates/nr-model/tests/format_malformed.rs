@@ -90,6 +90,84 @@ fn reseal(b: &mut [u8]) {
     b[188..192].copy_from_slice(&meta.to_le_bytes());
 }
 
+fn tiny_q1_nrm() -> Vec<u8> {
+    let mut b = tiny_nrm();
+    b[4..8].copy_from_slice(&4u32.to_le_bytes());
+    let tab = u64::from_le_bytes(b[152..160].try_into().unwrap()) as usize;
+    b[tab + 4..tab + 6].copy_from_slice(&4u16.to_le_bytes());
+    b[tab + 16..tab + 24].copy_from_slice(&36u64.to_le_bytes());
+    b[tab + 24..tab + 28].copy_from_slice(&2u32.to_le_bytes());
+    b[tab + 28..tab + 32].copy_from_slice(&128u32.to_le_bytes());
+    reseal(&mut b);
+    b
+}
+
+#[test]
+fn q1_layout_and_legacy_versions() {
+    use nr_model::format::{TensorDtype, TensorKind};
+    let b = tiny_q1_nrm();
+    let model = Model::parse(&b).unwrap();
+    let t = model.tensor(TensorKind::TokEmbed, 0).unwrap();
+    assert_eq!(t.dtype, TensorDtype::Q1_0);
+    assert_eq!(t.q1().len(), 2);
+    assert_eq!(TensorDtype::Q1_0.byte_size(128), Some(18));
+    assert_eq!(TensorDtype::Q1_0.byte_size(127), None);
+    assert_eq!(TensorDtype::Q1_0.byte_size(u64::MAX), None);
+    assert!(nr_model::verify::StreamingVerifier::new(&b).is_ok());
+    assert!(nr_model::verify::StreamingVerifier::new(&tiny_nrm()).is_ok());
+    let mut legacy = b;
+    legacy[4..8].copy_from_slice(&3u32.to_le_bytes());
+    reseal(&mut legacy);
+    assert!(matches!(Model::parse(&legacy), Err(ParseError::BadTable)));
+}
+
+#[test]
+fn rejects_q1_partial_rows_and_wrong_sizes() {
+    for partial_rows in [true, false] {
+        let mut b = tiny_q1_nrm();
+        let tab = u64::from_le_bytes(b[152..160].try_into().unwrap()) as usize;
+        if partial_rows {
+            // Total elements still align; each individual row does not.
+            b[tab + 24..tab + 28].copy_from_slice(&4u32.to_le_bytes());
+            b[tab + 28..tab + 32].copy_from_slice(&64u32.to_le_bytes());
+        } else {
+            b[tab + 16..tab + 24].copy_from_slice(&35u64.to_le_bytes());
+        }
+        reseal(&mut b);
+        assert!(matches!(Model::parse(&b), Err(ParseError::BadTable)));
+    }
+}
+
+#[test]
+fn validates_yarn_parameters() {
+    let mut b = tiny_q1_nrm();
+    b[8..12].copy_from_slice(&2u32.to_le_bytes()); // Qwen3
+    b[68..72].copy_from_slice(&nr_model::format::FLAG_ROPE_YARN.to_le_bytes());
+    for (off, v) in [
+        (44, 1_000_000.0f32),
+        (52, 4.0),
+        (56, 32.0),
+        (60, 1.0),
+        (64, 16384.0),
+        (164, 1.0),
+    ] {
+        b[off..off + 4].copy_from_slice(&v.to_le_bytes());
+    }
+    reseal(&mut b);
+    assert!(Model::parse(&b).is_ok());
+    for off in [44, 52, 56, 60, 64, 164] {
+        for bad in [0.0f32, f32::NAN, f32::INFINITY, -1.0] {
+            let mut mutated = b.clone();
+            mutated[off..off + 4].copy_from_slice(&bad.to_le_bytes());
+            reseal(&mut mutated);
+            assert!(
+                matches!(Model::parse(&mutated), Err(ParseError::BadTable)),
+                "offset {off}: {bad}"
+            );
+        }
+    }
+}
+
 fn expect_err(b: &[u8], what: &str) {
     match Model::parse(b) {
         Err(_) => {}

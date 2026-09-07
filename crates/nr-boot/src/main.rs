@@ -22,6 +22,22 @@ use uefi::prelude::*;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// LLVM can lower UTF-16 terminator scans to this Windows ABI routine.
+/// UEFI has no C runtime to provide it.
+///
+/// # Safety
+/// `s` must point to a readable, NUL-terminated sequence of u16 values.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn wcslen(s: *const u16) -> usize {
+    let mut len = 0;
+    // Volatile reads prevent LLVM from replacing this loop with wcslen.
+    while unsafe { s.add(len).read_volatile() } != 0 {
+        len += 1;
+    }
+    len
+}
+
 #[entry]
 fn main() -> Status {
     // FIRST: make FP/SIMD usable. QEMU's AAVMF enables it before running

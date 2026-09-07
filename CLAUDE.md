@@ -7,7 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 NightRun is a bare-metal x86_64 LLM appliance: a single `no_std` Rust UEFI
 application that boots from USB and runs Llama 3.2 1B (Q8_0),
 Qwen3-4B-Instruct-2507 (Q4_K_M) or Granite 4.1 3B (Q4_K_M, dense
-transformer only — hybrid Granite is rejected at conversion) with no OS.
+transformer only — hybrid Granite is rejected at conversion), or PrismML
+Bonsai 8B (Q1_0, Qwen3 with YaRN) with no OS.
 It deliberately **stays in UEFI Boot Services** (for USB keyboard, disk
 reads, and MP services) — do not add `ExitBootServices`, and never call
 firmware services from AP worker code (`nr-tensor::parallel` workers are
@@ -80,7 +81,7 @@ cargo run --release -p nrhost -- models/model.nrm --prompt "..." [--raw] \
 - No allocations in the generation loop: model tensors are zero-copy views
   into the loaded blob; KV cache + scratch come from the boot-time arena,
   sized from `InferCtx::required_bytes` — update it when adding buffers.
-  Weight matrices are dtype-tagged (`QMat`: Q8_0/Q4_K/Q6_K); dispatch once
+  Weight matrices are dtype-tagged (`QMat`: Q1_0/Q8_0/Q4_K/Q6_K); dispatch once
   per matvec, never inside row loops. After the model loads, storage is
   sealed (`modelload::seal_storage`) — any later disk read is a hard fault.
 - Visual identity is centralized in `nr-gfx::theme`; screens must keep the

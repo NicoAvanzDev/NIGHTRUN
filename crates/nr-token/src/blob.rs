@@ -1,7 +1,7 @@
 //! Tokenizer blob layout (little-endian), embedded in .nrm:
 //!
-//!   magic "NRTK", u32 version = 2
-//!   u32 template (1 = llama3 header-style, 2 = chatml)
+//!   magic "NRTK", u32 version = 3 (v2 remains readable)
+//!   u32 template (1 = llama3 header-style, 2 = chatml, 3 = granite, 4 = bonsai)
 //!   u32 vocab_count, u32 merge_count, u32 pool_size
 //!   u32 bos, eos, eot, start_header, end_header, end_of_text
 //!   [u32; 256]  byte -> token id
@@ -13,7 +13,7 @@
 use alloc::vec::Vec;
 
 pub const MAGIC: [u8; 4] = *b"NRTK";
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 pub const FLAG_CONTROL: u16 = 1;
 
@@ -24,6 +24,9 @@ pub enum Template {
     Llama3,
     /// ChatML (Qwen): <|im_start|>role\n ... <|im_end|>\n  (no BOS)
     ChatMl,
+    /// Bonsai ChatML with an empty thinking block in the generation header.
+    /// Unused ChatML slots bos/end_header hold </think>/<think> respectively.
+    Bonsai,
     /// Granite: <|start_of_role|>role<|end_of_role|>content<|end_of_text|>\n (no BOS)
     Granite,
 }
@@ -68,13 +71,14 @@ impl<'a> Tokenizer<'a> {
         if blob[0..4] != MAGIC {
             return Err(Error::BadMagic);
         }
-        if u32le(blob, 4) != VERSION {
+        if !matches!(u32le(blob, 4), 2 | VERSION) {
             return Err(Error::BadVersion);
         }
         let template = match u32le(blob, 8) {
             1 => Template::Llama3,
             2 => Template::ChatMl,
             3 => Template::Granite,
+            4 if u32le(blob, 4) >= 3 => Template::Bonsai,
             _ => return Err(Error::BadVersion),
         };
         let vocab_count = u32le(blob, 12);
@@ -234,7 +238,7 @@ impl<'a> Tokenizer<'a> {
             // Granite's "dbrx" pretokenizer is the cl100k pattern — the
             // same regex as Llama 3 (fixture-verified).
             Template::Llama3 | Template::Granite => crate::pretok::Style::Llama3,
-            Template::ChatMl => crate::pretok::Style::Qwen2,
+            Template::ChatMl | Template::Bonsai => crate::pretok::Style::Qwen2,
         };
         for chunk in crate::pretok::chunks(text, style) {
             self.encode_chunk(chunk.as_bytes(), out);

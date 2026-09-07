@@ -1,4 +1,4 @@
-//! nrconvert: GGUF (Q8_0) -> NightRun .nrm converter.
+//! nrconvert: GGUF (Q1_0 / Q8_0 / Q4_K / Q6_K) -> NightRun .nrm converter.
 //!
 //! Usage: nrconvert <input.gguf> <output.nrm>
 
@@ -8,7 +8,7 @@ mod tokenizer;
 use nr_model::crc32::Crc32;
 use nr_model::format::{self, TensorDtype, TensorKind};
 
-use crate::gguf::{Gguf, TensorInfo, GGML_F32, GGML_Q4_K, GGML_Q6_K, GGML_Q8_0};
+use crate::gguf::{Gguf, TensorInfo, GGML_F32, GGML_Q1_0, GGML_Q4_K, GGML_Q6_K, GGML_Q8_0};
 
 fn kv_u32(g: &Gguf, key: &str) -> u32 {
     g.kv.get(key)
@@ -26,6 +26,7 @@ fn kv_f32(g: &Gguf, key: &str) -> f32 {
 /// general.file_type (llama.cpp ftype enum).
 fn quant_label(g: &Gguf) -> &'static str {
     match g.kv.get("general.file_type").and_then(gguf::Value::as_u32) {
+        Some(40) => "Q1_0",
         Some(7) => "Q8_0",
         Some(14) => "Q4_K_S",
         Some(15) => "Q4_K_M",
@@ -50,6 +51,7 @@ fn ggml_dtype_name(t: u32) -> String {
     match t {
         0 => "F32".into(),
         1 => "F16".into(),
+        GGML_Q1_0 => "Q1_0".into(),
         8 => "Q8_0".into(),
         12 => "Q4_K".into(),
         13 => "Q5_K".into(),
@@ -232,16 +234,22 @@ fn main() {
     let mut push = |t: &TensorInfo, kind: TensorKind, layer: u16| {
         let dtype = match t.dtype {
             GGML_F32 => TensorDtype::F32,
+            GGML_Q1_0 => TensorDtype::Q1_0,
             GGML_Q8_0 => TensorDtype::Q8_0,
             GGML_Q4_K => TensorDtype::Q4K,
             GGML_Q6_K => TensorDtype::Q6K,
             other => panic!(
-                "{}: unsupported dtype {other} (supported: F32, Q8_0, Q4_K, Q6_K)",
+                "{}: unsupported dtype {other} (supported: F32, Q1_0, Q8_0, Q4_K, Q6_K)",
                 t.name
             ),
         };
         let cols = t.dims[0] as u32;
         let rows = t.dims.get(1).copied().unwrap_or(1) as u32;
+        assert!(
+            dtype != TensorDtype::Q1_0 || cols.is_multiple_of(128),
+            "{}: Q1_0 row width must be divisible by 128",
+            t.name
+        );
         out.push(OutTensor {
             kind,
             layer,
@@ -289,6 +297,29 @@ fn main() {
         g.kv.get("llama.rope.scaling.factor")
             .and_then(gguf::Value::as_f32)
             .unwrap_or(0.0);
+
+    // Bonsai's Qwen3 GGUF uses YaRN, including magnitude scaling.
+    let yarn = arch_id == 2
+        && g.kv
+            .get(&akey("rope.scaling.type"))
+            .and_then(gguf::Value::as_str)
+            == Some("yarn");
+    let optional_float = |key: &str, default| {
+        g.kv.get(&akey(key))
+            .and_then(gguf::Value::as_f32)
+            .unwrap_or(default)
+    };
+    let (rope_factor, rope_low, rope_high, rope_orig_ctx, rope_attn_factor) = if yarn {
+        (
+            kv_f32(&g, &akey("rope.scaling.factor")),
+            optional_float("rope.scaling.yarn_beta_fast", 32.0),
+            optional_float("rope.scaling.yarn_beta_slow", 1.0),
+            kv_u32(&g, &akey("rope.scaling.original_context_length")) as f32,
+            optional_float("rope.scaling.attn_factor", 1.0),
+        )
+    } else {
+        (rope_factor, 0.0, 0.0, 0.0, 1.0)
+    };
 
     // Granite muP scalars: required semantics for granite (no invented
     // defaults); neutral values for other families. attn_scale 0.0 means
@@ -365,7 +396,7 @@ fn main() {
     let data_crc = dcrc.finish();
 
     // Serialize the header (see nr-model::format for the layout).
-    let mut flags = 0u32;
+    let mut flags = if yarn { format::FLAG_ROPE_YARN } else { 0 };
     if tied {
         flags |= format::FLAG_TIED_EMBEDDINGS;
     }
@@ -378,7 +409,14 @@ fn main() {
     ] {
         header.extend_from_slice(&v.to_le_bytes());
     }
-    for v in [rope_theta, norm_eps, rope_factor, 0.0, 0.0, 0.0] {
+    for v in [
+        rope_theta,
+        norm_eps,
+        rope_factor,
+        rope_low,
+        rope_high,
+        rope_orig_ctx,
+    ] {
         header.extend_from_slice(&v.to_bits().to_le_bytes());
     }
     header.extend_from_slice(&flags.to_le_bytes());
@@ -398,7 +436,7 @@ fn main() {
     header.extend_from_slice(&(tok.blob.len() as u64).to_le_bytes());
     header.extend_from_slice(&table_off.to_le_bytes());
     header.extend_from_slice(&(out.len() as u32).to_le_bytes());
-    header.extend_from_slice(&0u32.to_le_bytes());
+    header.extend_from_slice(&rope_attn_factor.to_le_bytes());
     header.extend_from_slice(&data_off.to_le_bytes());
     header.extend_from_slice(&data_size.to_le_bytes());
     header.extend_from_slice(&data_crc.to_le_bytes());

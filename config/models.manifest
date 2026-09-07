@@ -4,7 +4,7 @@
 # comments are ignored. Bump `manifest.version` on format changes.
 #
 # sha256 values were computed from local artifacts AND cross-checked against
-# Hugging Face's X-Linked-ETag (the LFS object hash) on 2026-07-07.
+# Hugging Face's LFS object hashes (original models: 2026-07-07; Bonsai: 2026-09-07).
 # `revision` pins the repo commit the artifact was fetched from; downloads
 # resolve `.../resolve/<revision>/<file>` so a moved branch cannot silently
 # change what users get.
@@ -73,4 +73,20 @@ model.qwen3-4b.min_ram_gb     = 8
 model.qwen3-4b.targets        = x86_64,rpi5-8gb
 model.qwen3-4b.nrm_bytes      = 2495954880
 model.qwen3-4b.min_media_gb   = 4
-model.qwen3-4b.blurb          = The largest catalog model - needs an 8 GB board on Pi 5
+model.qwen3-4b.blurb          = Needs an 8 GB board on Pi 5
+
+model.bonsai-8b.name          = Bonsai 8B (PrismML)
+model.bonsai-8b.family        = qwen3
+model.bonsai-8b.quant         = Q1_0
+model.bonsai-8b.repo          = prism-ml/Bonsai-8B-gguf
+model.bonsai-8b.file          = Bonsai-8B-Q1_0.gguf
+model.bonsai-8b.revision      = 48516770dd04643643e9f9019a2a349cf26c5dbd
+model.bonsai-8b.sha256        = 284a335aa3fb2ced3b1b01fcb40b08aa783e3b70832767f0dd2e3fdfa134bd54
+model.bonsai-8b.size_bytes    = 1158654496
+model.bonsai-8b.license       = Apache-2.0 (PrismML)
+model.bonsai-8b.gated         = no
+model.bonsai-8b.min_ram_gb    = 4
+model.bonsai-8b.targets       = x86_64,rpi5
+model.bonsai-8b.nrm_bytes     = 1157330048
+model.bonsai-8b.min_media_gb  = 4
+model.bonsai-8b.blurb         = 8B parameters in 1-bit weights - compact Qwen3 with YaRN

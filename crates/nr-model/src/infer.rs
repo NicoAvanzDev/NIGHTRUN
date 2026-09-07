@@ -3,13 +3,14 @@
 //! matvecs throughout. Supports the Llama-3 recipe and the Qwen3 variant
 //! (per-head Q/K RMSNorm, attention width != hidden width).
 //!
-//! Weight matrices are dtype-tagged (Q8_0 / Q4_K / Q6_K); dispatch happens
+//! Weight matrices are dtype-tagged (Q1_0 / Q8_0 / Q4_K / Q6_K); dispatch happens
 //! once per matvec call, never inside row loops. Activations are quantized
 //! to the matching format (Q8_0 or Q8_K). Single token per step; all
 //! buffers preallocated — generation never allocates.
 
 use nr_tensor::kernels::{axpy_f16, dot_f16, matmul_q8, matvec_q8};
 use nr_tensor::kquant::{self, BlockQ4K, BlockQ6K, BlockQ8K, QK_K};
+use nr_tensor::q1::{self, BlockQ1_0, QK1_0};
 use nr_tensor::q8::{self, BlockQ8_0, QK8_0};
 use nr_tensor::{f32_to_f16, rope, vec as tvec};
 
@@ -18,6 +19,7 @@ use crate::format::{Arch, Model, ParseError, TensorDtype, TensorKind, TensorView
 /// A dtype-tagged weight matrix (rows x cols), viewed in place.
 #[derive(Clone, Copy)]
 pub enum QMat<'m> {
+    Q1(&'m [BlockQ1_0]),
     Q8(&'m [BlockQ8_0]),
     Q4K(&'m [BlockQ4K]),
     Q6K(&'m [BlockQ6K]),
@@ -26,6 +28,7 @@ pub enum QMat<'m> {
 impl<'m> QMat<'m> {
     fn from_view(v: TensorView<'m>) -> Result<QMat<'m>, ParseError> {
         Ok(match v.dtype {
+            TensorDtype::Q1_0 => QMat::Q1(v.q1()),
             TensorDtype::Q8_0 => QMat::Q8(v.q8()),
             TensorDtype::Q4K => QMat::Q4K(v.q4k()),
             TensorDtype::Q6K => QMat::Q6K(v.q6k()),
@@ -36,6 +39,10 @@ impl<'m> QMat<'m> {
     /// Dequantize row `r` (cols values) into `out`.
     fn dequant_row(&self, r: usize, cols: usize, out: &mut [f32]) {
         match self {
+            QMat::Q1(blocks) => {
+                let bpr = cols / QK1_0;
+                q1::dequantize(&blocks[r * bpr..(r + 1) * bpr], out);
+            }
             QMat::Q8(blocks) => {
                 let bpr = cols / QK8_0;
                 q8::dequantize(&blocks[r * bpr..(r + 1) * bpr], out);
@@ -113,6 +120,11 @@ impl Acts {
         let cols = x.len();
         let rows = y.len();
         match w {
+            QMat::Q1(blocks) => {
+                let xq = &mut self.q8[..cols / QK8_0];
+                q1::quantize_activations(x, xq);
+                q1::matvec(y, blocks, xq, rows, cols);
+            }
             QMat::Q8(blocks) => {
                 let xq = &mut self.q8[..cols / QK8_0];
                 q8::quantize(x, xq);
@@ -139,6 +151,17 @@ impl Acts {
         let cols = xs.len() / batch;
         let rows = y.len() / batch;
         match w {
+            QMat::Q1(blocks) => {
+                let bpr = cols / QK8_0;
+                let xq = &mut self.q8[..batch * bpr];
+                for b in 0..batch {
+                    q1::quantize_activations(
+                        &xs[b * cols..(b + 1) * cols],
+                        &mut xq[b * bpr..(b + 1) * bpr],
+                    );
+                }
+                q1::matmul(y, blocks, xq, rows, cols, batch);
+            }
             QMat::Q8(blocks) => {
                 let bpr = cols / QK8_0;
                 let xq = &mut self.q8[..batch * bpr];
@@ -179,21 +202,35 @@ impl Acts {
     /// quantized exactly once.
     fn matmul_group(&mut self, jobs: &mut [(&mut [f32], QMat)], xs: &[f32], batch: usize) {
         let cols = xs.len() / batch;
-        let mut q8_ready = false;
+        // Which Q8_0 rounding recipe currently occupies the shared buffer.
+        let mut q8_for_q1 = None;
         let mut q8k_ready = false;
         for (y, w) in jobs.iter_mut() {
             let rows = y.len() / batch;
             match w {
+                QMat::Q1(blocks) => {
+                    let bpr = cols / QK8_0;
+                    if q8_for_q1 != Some(true) {
+                        for b in 0..batch {
+                            q1::quantize_activations(
+                                &xs[b * cols..(b + 1) * cols],
+                                &mut self.q8[b * bpr..(b + 1) * bpr],
+                            );
+                        }
+                        q8_for_q1 = Some(true);
+                    }
+                    q1::matmul(y, blocks, &self.q8[..batch * bpr], rows, cols, batch);
+                }
                 QMat::Q8(blocks) => {
                     let bpr = cols / QK8_0;
-                    if !q8_ready {
+                    if q8_for_q1 != Some(false) {
                         for b in 0..batch {
                             q8::quantize(
                                 &xs[b * cols..(b + 1) * cols],
                                 &mut self.q8[b * bpr..(b + 1) * bpr],
                             );
                         }
-                        q8_ready = true;
+                        q8_for_q1 = Some(false);
                     }
                     matmul_q8(y, blocks, &self.q8[..batch * bpr], rows, cols, batch);
                 }
@@ -231,14 +268,22 @@ impl Acts {
     /// needed format exactly once.
     fn matvec_group(&mut self, jobs: &mut [(&mut [f32], QMat)], x: &[f32]) {
         let cols = x.len();
-        let mut q8_ready = false;
+        // Which Q8_0 rounding recipe currently occupies the shared buffer.
+        let mut q8_for_q1 = None;
         let mut q8k_ready = false;
         for (y, w) in jobs.iter_mut() {
             match w {
+                QMat::Q1(blocks) => {
+                    if q8_for_q1 != Some(true) {
+                        q1::quantize_activations(x, &mut self.q8[..cols / QK8_0]);
+                        q8_for_q1 = Some(true);
+                    }
+                    q1::matvec(y, blocks, &self.q8[..cols / QK8_0], y.len(), cols);
+                }
                 QMat::Q8(blocks) => {
-                    if !q8_ready {
+                    if q8_for_q1 != Some(false) {
                         q8::quantize(x, &mut self.q8[..cols / QK8_0]);
-                        q8_ready = true;
+                        q8_for_q1 = Some(false);
                     }
                     matvec_q8(y, blocks, &self.q8[..cols / QK8_0], y.len(), cols);
                 }
@@ -266,6 +311,7 @@ pub struct InferCtx<'m> {
     pub weights: Weights<'m>,
     norm_eps: f32,
     rope_style: rope::RopeStyle,
+    rope_magnitude: f32,
     // muP scalars (neutral 1.0 / precomputed for non-Granite models).
     embed_scale: f32,
     att_score_scale: f32,
@@ -434,7 +480,20 @@ impl<'m> InferCtx<'m> {
             high_freq_factor: m.rope_high,
             original_context: m.rope_orig_ctx,
         });
-        if model.has_tensor(TensorKind::RopeFreqs) {
+        let mut rope_magnitude = 1.0;
+        if m.flags & crate::format::FLAG_ROPE_YARN != 0 {
+            rope_magnitude = rope::yarn_freqs(
+                freqs,
+                dims.head_dim,
+                m.rope_theta,
+                rope::YarnScaling {
+                    factor: m.rope_factor,
+                    beta_fast: m.rope_low,
+                    beta_slow: m.rope_high,
+                    original_context: m.rope_orig_ctx,
+                },
+            ) * m.rope_attn_factor;
+        } else if model.has_tensor(TensorKind::RopeFreqs) {
             rope::rope_freqs(freqs, dims.head_dim, m.rope_theta, None);
             let factors = model.tensor(TensorKind::RopeFreqs, 0)?.f32();
             for (f, &d) in freqs.iter_mut().zip(factors) {
@@ -447,6 +506,7 @@ impl<'m> InferCtx<'m> {
         let maxd = dims.dim.max(dims.att_dim).max(dims.ffn_dim);
         Ok(InferCtx {
             norm_eps: m.norm_eps,
+            rope_magnitude,
             rope_style: match m.arch {
                 Arch::Llama3 | Arch::Granite => rope::RopeStyle::Adjacent,
                 Arch::Qwen3 => rope::RopeStyle::Neox,
@@ -540,8 +600,22 @@ impl<'m> InferCtx<'m> {
                 }
             }
 
-            rope::apply(self.q, d.head_dim, self.freqs, pos, self.rope_style);
-            rope::apply(self.k, d.head_dim, self.freqs, pos, self.rope_style);
+            rope::apply_scaled(
+                self.q,
+                d.head_dim,
+                self.freqs,
+                pos,
+                self.rope_style,
+                self.rope_magnitude,
+            );
+            rope::apply_scaled(
+                self.k,
+                d.head_dim,
+                self.freqs,
+                pos,
+                self.rope_style,
+                self.rope_magnitude,
+            );
 
             // Append K/V to the cache as f16.
             let cache_row = (l * d.ctx + pos) * d.kv_dim;
@@ -649,8 +723,22 @@ impl<'m> InferCtx<'m> {
                         tvec::rmsnorm_inplace(head, kn, self.norm_eps);
                     }
                 }
-                rope::apply(q, d.head_dim, self.freqs, pos, self.rope_style);
-                rope::apply(k, d.head_dim, self.freqs, pos, self.rope_style);
+                rope::apply_scaled(
+                    q,
+                    d.head_dim,
+                    self.freqs,
+                    pos,
+                    self.rope_style,
+                    self.rope_magnitude,
+                );
+                rope::apply_scaled(
+                    k,
+                    d.head_dim,
+                    self.freqs,
+                    pos,
+                    self.rope_style,
+                    self.rope_magnitude,
+                );
                 let cache_row = (l * d.ctx + pos) * d.kv_dim;
                 for j in 0..d.kv_dim {
                     self.key_cache[cache_row + j] = f32_to_f16(k[j]);

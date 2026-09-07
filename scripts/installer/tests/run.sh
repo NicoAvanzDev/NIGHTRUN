@@ -70,7 +70,7 @@ t "diskpath: mmcblk0 shape accepted" bash -c '
 # ---- manifest ------------------------------------------------------------
 
 t "manifest: loads" nr_manifest_load "$NR_MANIFEST"
-t "manifest: four models" eq "${#NR_MODEL_IDS[@]}" 4
+t "manifest: five models" eq "${#NR_MODEL_IDS[@]}" 5
 t "manifest: llama sha present" eq "${NR_MF[llama-1b.sha256]:0:8}" "432f310a"
 t "manifest: malformed line tolerated" bash -c '
     source "'"$LIB"'/safety.sh" >/dev/null 2>&1
@@ -81,8 +81,13 @@ t "manifest: malformed line tolerated" bash -c '
     # It must not crash; it must fail cleanly (missing required fields).
     [[ $rc -eq 1 ]]'
 
+t "manifest: bonsai Q1_0" eq "${NR_MF[bonsai-8b.quant]}" "Q1_0"
+t "manifest: bonsai revision pinned" eq "${NR_MF[bonsai-8b.revision]}" "48516770dd04643643e9f9019a2a349cf26c5dbd"
+
 # target filtering
 NR_TARGET="rpi5"
+t "filter: bonsai supports rpi5" nr_model_supports bonsai-8b rpi5
+t "filter: bonsai supports x86" nr_model_supports bonsai-8b x86_64
 t "filter: llama supports rpi5"    nr_model_supports llama-1b rpi5
 t "filter: qwen matches rpi5 base" nr_model_supports qwen3-4b rpi5
 t "filter: qwen rpi5 has 8gb note" eq "$(nr_model_target_note qwen3-4b rpi5)" "8gb"

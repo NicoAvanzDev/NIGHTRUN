@@ -27,7 +27,7 @@ and on a Raspberry Pi 5 from an SD card.
 1. Run the installer. It builds a bootable image and flashes it to a USB stick or SD card.
 2. Boot a machine from that stick.
 3. Firmware starts NightRun. No OS loads, because there is no OS on the media.
-4. The model (1.3 to 2.4 GB) streams into RAM with checksums verified during the read.
+4. The model (1.1 to 2.4 GB) streams into RAM with checksums verified during the read.
 5. Storage is sealed. Any later disk read is a hard fault, on purpose.
 6. You get a chat prompt. The model answers on your CPU, offline, forever.
 
@@ -77,7 +77,7 @@ streams from disk (there is no separate verify pass), and sealed storage afterwa
 Generation never touches the disk.
 
 **Inference.** Hand-written quantized kernels: AVX2+FMA+F16C on x86_64, NEON on the Pi,
-scalar reference implementations kept for both. Q8_0, Q4_K and Q6_K weights are used in
+scalar reference implementations kept for both. Q1_0, Q8_0, Q4_K and Q6_K weights are used in
 place, no dequantized copies. Prompt processing is batched (up to 64 tokens per pass) and
 proven bit-identical to token-at-a-time decode. The generation loop allocates nothing.
 
@@ -102,18 +102,26 @@ If a kernel change breaks parity, the kernel is wrong. That rule has caught real
 | Llama 3.2 3B Instruct | Q4_K_M | 1.9 GB | 6 GB | x86_64, Pi 5 |
 | Granite 4.1 3B | Q4_K_M | 2.0 GB | 6 GB | x86_64, Pi 5 |
 | Qwen3 4B Instruct 2507 | Q4_K_M | 2.3 GB | 8 GB | x86_64, Pi 5 (8 GB) |
+| Bonsai 8B (PrismML) | Q1_0 (1-bit) | 1.1 GB | 4 GB | x86_64, Pi 5 |
 
 Three model families are implemented, each with its real quirks handled faithfully:
 
 - **Llama 3.2**: GQA, adjacent-pair RoPE, tied embeddings, the Llama 3 chat template.
 - **Qwen3**: NEOX-style rope (half-split pairs), per-head Q/K RMSNorm before rope, no BOS
-  token, attention width (4096) wider than the hidden size (2560), tied output head.
+  token. The 4B model has attention width (4096) wider than its hidden size (2560)
+  and a tied output head. Bonsai 8B has a separate 1-bit output head, YaRN position
+  scaling, and its own ChatML generation suffix with thinking disabled.
 - **Granite 4.1**: dense transformer only. GQA, SwiGLU, four muP-style scalars from the
   header (embedding, attention, residual, logit). Hybrid SSM/MoE Granite variants are
   rejected at conversion with a named reason, not mangled at runtime.
 
-Any GGUF whose tensors use Q8_0, Q4_K, Q6_K or F32 converts with each tensor's exact
-dtype preserved, so Q8_0, Q4_K_M, Q4_K_S and Q6_K builds of these families all work.
+Any GGUF whose tensors use Q1_0, Q8_0, Q4_K, Q6_K or F32 converts with each tensor's exact
+dtype preserved, so Q1_0, Q8_0, Q4_K_M, Q4_K_S and Q6_K builds of these families all work.
+
+[Bonsai 8B](https://huggingface.co/prism-ml/Bonsai-8B-gguf) is published by PrismML
+and uses Qwen3 architecture. Select it in `./install.sh`, or convert the official
+`Bonsai-8B-Q1_0.gguf` to `models/bonsai-8b-q1.nrm` with `nrconvert`.
+
 This is not "arbitrary GGUF support": a new architecture family needs engine work and
 reference validation, and the converter will tell you so.
 
@@ -286,5 +294,5 @@ wrong, not the fixture.
 MIT. See [LICENSE](LICENSE).
 
 Model weights are not included and carry their own terms: the Llama models under the
-Llama Community License, Qwen and Granite builds under Apache-2.0. The Spleen bitmap
+Llama Community License, Qwen, Granite and Bonsai builds under Apache-2.0. The Spleen bitmap
 font is BSD-2-Clause (bundled, attribution in [assets/fonts](assets/fonts)).

@@ -17,6 +17,15 @@ fn load_model_blob(file: &str) -> Option<Vec<u8>> {
 }
 
 fn greedy_in(model_file: &str, prompt: &str, n: usize, chat: bool) -> Option<String> {
+    greedy_tokens_in(model_file, prompt, n, chat).map(|(_, text)| text)
+}
+
+fn greedy_tokens_in(
+    model_file: &str,
+    prompt: &str,
+    n: usize,
+    chat: bool,
+) -> Option<(Vec<u32>, String)> {
     let blob = load_model_blob(model_file)?;
     let model = nr_model::Model::parse(&blob).expect("parse model");
     let tok = nr_token::Tokenizer::parse(model.tokenizer_blob).expect("tokenizer");
@@ -41,15 +50,17 @@ fn greedy_in(model_file: &str, prompt: &str, n: usize, chat: bool) -> Option<Str
     }
     let mut logits: &[f32] = ctx.prefill(&ids);
     let mut out = Vec::new();
+    let mut generated = Vec::new();
     for _ in 0..n {
         let next = nr_tensor::vec::argmax(logits) as u32;
         if tok.is_stop(next) {
             break;
         }
+        generated.push(next);
         out.extend_from_slice(tok.token_bytes(next));
         logits = ctx.forward(next);
     }
-    Some(String::from_utf8_lossy(&out).into_owned())
+    Some((generated, String::from_utf8_lossy(&out).into_owned()))
 }
 
 fn greedy(prompt: &str, n: usize) -> Option<String> {
@@ -257,4 +268,89 @@ fn neutral_scalars_are_noops() {
         nr_tensor::vec::add_assign(&mut y2, &x);
         assert_eq!(y, y2);
     }
+}
+
+// Bonsai-8B Q1_0: reference uses the GGUF's exact generation suffix,
+// <|im_start|>assistant\n<think>\n\n</think>\n\n (thinking disabled).
+#[test]
+fn bonsai_chat_greedy_matches_llama_cpp() {
+    let _guard = serial();
+    let Some((ids, text)) = greedy_tokens_in(
+        "bonsai-8b-q1.nrm",
+        "What is the capital of France?",
+        20,
+        true,
+    ) else {
+        eprintln!("SKIP: models/bonsai-8b-q1.nrm not present");
+        return;
+    };
+    assert_eq!(text, "The capital of France is Paris.");
+    assert_eq!(ids, [785, 6722, 315, 9625, 374, 12095, 13]);
+}
+
+#[test]
+fn bonsai_metadata_and_template_audit() {
+    use nr_model::format::{Arch, TensorDtype, TensorKind, FLAG_ROPE_YARN, FLAG_TIED_EMBEDDINGS};
+    let _guard = serial();
+    let Some(blob) = load_model_blob("bonsai-8b-q1.nrm") else {
+        eprintln!("SKIP: models/bonsai-8b-q1.nrm not present");
+        return;
+    };
+    let model = nr_model::Model::parse(&blob).expect("parse");
+    let m = &model.meta;
+    assert_eq!(m.arch, Arch::Qwen3);
+    assert_eq!(
+        (m.dim, m.n_layers, m.n_heads, m.n_kv_heads, m.head_dim),
+        (4096, 36, 32, 8, 128)
+    );
+    assert_eq!(m.flags & FLAG_TIED_EMBEDDINGS, 0);
+    assert_ne!(m.flags & FLAG_ROPE_YARN, 0);
+    assert_eq!(
+        (m.rope_factor, m.rope_orig_ctx, m.rope_low, m.rope_high),
+        (4.0, 16384.0, 32.0, 1.0)
+    );
+    assert_eq!(m.rope_attn_factor, 1.0);
+    for kind in [TensorKind::TokEmbed, TensorKind::Output] {
+        let t = model.tensor(kind, 0).unwrap();
+        assert_eq!(t.dtype, TensorDtype::Q1_0);
+        assert_eq!((t.rows, t.cols), (151669, 4096));
+    }
+    let tok = nr_token::Tokenizer::parse(model.tokenizer_blob).unwrap();
+    assert_eq!(tok.template, nr_token::blob::Template::Bonsai);
+    let mut ids = Vec::new();
+    tok.encode_conversation_start(None, &mut ids);
+    assert!(ids.is_empty());
+    tok.encode_message("user", "What is the capital of France?", &mut ids);
+    tok.encode_header("assistant", &mut ids);
+    // Token IDs independently verified with llama-completion --verbose-prompt.
+    assert_eq!(
+        ids,
+        [
+            151644, 872, 198, 3838, 374, 279, 6722, 315, 9625, 30, 151645, 198, 151644, 77091, 198,
+            151667, 271, 151668, 271
+        ]
+    );
+    assert!(tok.is_stop(151645));
+    ids.clear();
+    tok.encode_text("<think></think>", &mut ids);
+    assert!(
+        !ids.contains(&151667) && !ids.contains(&151668),
+        "user text must not inject control tokens"
+    );
+}
+
+#[test]
+fn bonsai_raw_greedy_matches_llama_cpp() {
+    let _guard = serial();
+    let Some((ids, text)) =
+        greedy_tokens_in("bonsai-8b-q1.nrm", "The capital of France is", 12, false)
+    else {
+        eprintln!("SKIP: models/bonsai-8b-q1.nrm not present");
+        return;
+    };
+    assert_eq!(text, " Paris. Paris is the capital of France. Paris is the");
+    assert_eq!(
+        ids,
+        [12095, 13, 12095, 374, 279, 6722, 315, 9625, 13, 12095, 374, 279]
+    );
 }

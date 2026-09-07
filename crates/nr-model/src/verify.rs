@@ -9,11 +9,11 @@
 //! how the loader reads.
 
 use crate::crc32::Crc32;
-use crate::format::{HEADER_SIZE, MAGIC, VERSION};
+use crate::format::{supported_version, HEADER_SIZE, MAGIC};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerifyError {
-    /// Header magic/version wrong (not a v-current .nrm).
+    /// Header magic/version wrong (not a supported .nrm).
     BadHeader,
     /// Header/tokenizer/tensor-table checksum mismatch.
     MetaCrc,
@@ -43,10 +43,10 @@ impl StreamingVerifier {
         }
         let u32at = |off: usize| u32::from_le_bytes(header[off..off + 4].try_into().unwrap());
         let u64at = |off: usize| u64::from_le_bytes(header[off..off + 8].try_into().unwrap());
-        if u32at(4) != VERSION {
+        if !supported_version(u32at(4)) {
             return Err(VerifyError::BadHeader);
         }
-        // Offsets per format v3 layout (see nr-model::format).
+        // Offsets per format v3/v4 layout (see nr-model::format).
         let tok_off = u64at(136) as usize;
         let tok_size = u64at(144) as usize;
         let table_off = u64at(152) as usize;

@@ -172,6 +172,13 @@ pub fn build(gguf: &Gguf, family: Family) -> BuiltTokenizer {
     };
     // Generic special slots (see nr-token::blob): for chatml, <|im_start|>
     // fills start_header and <|im_end|> fills eot; end_header is unused.
+    // Bonsai's shipped template explicitly disables thinking at generation.
+    // Match the instruction in the GGUF, rather than guessing from its name.
+    let bonsai_template = gguf
+        .kv
+        .get("tokenizer.chat_template")
+        .and_then(Value::as_str)
+        .is_some_and(|s| s.contains("<|im_start|>assistant\\n<think>\\n\\n</think>\\n\\n"));
     let (template_id, eot, start_header, end_header, end_of_text) = match family {
         Family::Llama3 => (
             1u32,
@@ -179,6 +186,13 @@ pub fn build(gguf: &Gguf, family: Family) -> BuiltTokenizer {
             lookup_literal("<|start_header_id|>"),
             lookup_literal("<|end_header_id|>"),
             lookup_literal("<|end_of_text|>"),
+        ),
+        Family::Qwen3 if bonsai_template => (
+            4u32,
+            lookup_literal("<|im_end|>"),
+            lookup_literal("<|im_start|>"),
+            lookup_literal("<think>"),
+            lookup_literal("<|endoftext|>"),
         ),
         Family::Qwen3 => (
             2u32,
@@ -195,6 +209,12 @@ pub fn build(gguf: &Gguf, family: Family) -> BuiltTokenizer {
             lookup_literal("<|end_of_role|>"),
             lookup_literal("<|end_of_text|>"),
         ),
+    };
+
+    let bos = if template_id == 4 {
+        lookup_literal("</think>")
+    } else {
+        bos
     };
 
     // Serialize.

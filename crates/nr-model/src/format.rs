@@ -12,13 +12,19 @@
 use alloc::vec::Vec;
 
 pub const MAGIC: [u8; 4] = *b"NRUN";
-pub const VERSION: u32 = 3;
+// v4 adds Q1_0 and YaRN; header size and existing dtype IDs stay fixed.
+pub const VERSION: u32 = 4;
+
+pub fn supported_version(version: u32) -> bool {
+    matches!(version, 3 | VERSION)
+}
 pub const HEADER_SIZE: usize = 192;
 pub const NAME_LEN: usize = 48;
 pub const ENTRY_SIZE: usize = 32;
 pub const DATA_ALIGN: usize = 64;
 
 pub const FLAG_TIED_EMBEDDINGS: u32 = 1;
+pub const FLAG_ROPE_YARN: u32 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -99,6 +105,7 @@ pub enum TensorDtype {
     Q8_0 = 1,
     Q4K = 2,
     Q6K = 3,
+    Q1_0 = 4,
 }
 
 impl TensorDtype {
@@ -107,6 +114,10 @@ impl TensorDtype {
     pub fn byte_size(self, n: u64) -> Option<u64> {
         match self {
             TensorDtype::F32 => n.checked_mul(4),
+            TensorDtype::Q1_0 => n
+                .is_multiple_of(128)
+                .then_some(n / 128)
+                .and_then(|b| b.checked_mul(18)),
             TensorDtype::Q8_0 => n
                 .is_multiple_of(32)
                 .then_some(n / 32)
@@ -136,11 +147,14 @@ pub struct Meta {
     pub ctx_train: u32,
     pub rope_theta: f32,
     pub norm_eps: f32,
-    /// Llama-3 rope scaling; factor == 0 means none.
+    /// RoPE scaling; factor == 0 means none. FLAG_ROPE_YARN selects
+    /// YaRN, with rope_low/high holding beta_fast/slow instead.
     pub rope_factor: f32,
     pub rope_low: f32,
     pub rope_high: f32,
     pub rope_orig_ctx: f32,
+    /// YaRN magnitude multiplier (v4 offset 164; neutral 1.0 for v3).
+    pub rope_attn_factor: f32,
     pub flags: u32,
     /// muP-style scalars (Granite); neutral values elsewhere.
     /// embed_scale: multiplies the token embedding (neutral 1.0).
@@ -196,6 +210,11 @@ impl<'a> TensorView<'a> {
         unsafe {
             core::slice::from_raw_parts(self.bytes.as_ptr() as *const f32, self.bytes.len() / 4)
         }
+    }
+
+    pub fn q1(&self) -> &'a [nr_tensor::q1::BlockQ1_0] {
+        assert_eq!(self.dtype, TensorDtype::Q1_0);
+        nr_tensor::q1::cast_blocks(self.bytes)
     }
 
     pub fn q8(&self) -> &'a [nr_tensor::BlockQ8_0] {
@@ -266,11 +285,11 @@ impl<'a> Model<'a> {
         }
         let mut c = Cursor(blob, 4);
         let version = c.u32();
-        if version != VERSION {
+        if !supported_version(version) {
             return Err(ParseError::BadVersion(version));
         }
         let arch = Arch::from_u32(c.u32()).ok_or(ParseError::BadTable)?;
-        let meta = Meta {
+        let mut meta = Meta {
             arch,
             dim: c.u32(),
             n_layers: c.u32(),
@@ -286,6 +305,7 @@ impl<'a> Model<'a> {
             rope_low: c.f32(),
             rope_high: c.f32(),
             rope_orig_ctx: c.f32(),
+            rope_attn_factor: 1.0,
             flags: c.u32(),
             embed_scale: c.f32(),
             attn_scale: c.f32(),
@@ -302,7 +322,10 @@ impl<'a> Model<'a> {
         let tok_size = c.u64() as usize;
         let table_off = c.u64() as usize;
         let tensor_count = c.u32() as usize;
-        let _pad = c.u32();
+        let rope_attn_factor = c.f32();
+        if version >= 4 {
+            meta.rope_attn_factor = rope_attn_factor;
+        }
         let data_off = c.u64() as usize;
         let data_size = c.u64() as usize;
         let data_crc = c.u32();
@@ -316,6 +339,25 @@ impl<'a> Model<'a> {
             || meta.residual_scale <= 0.0
             || !meta.logit_scale.is_finite()
             || meta.logit_scale <= 0.0
+        {
+            return Err(ParseError::BadTable);
+        }
+
+        if meta.flags & FLAG_ROPE_YARN != 0
+            && (version < 4
+                || meta.arch != Arch::Qwen3
+                || !meta.rope_factor.is_finite()
+                || meta.rope_factor < 1.0
+                || !meta.rope_low.is_finite()
+                || !meta.rope_high.is_finite()
+                || meta.rope_high <= 0.0
+                || meta.rope_low <= meta.rope_high
+                || !meta.rope_orig_ctx.is_finite()
+                || meta.rope_orig_ctx <= 0.0
+                || !meta.rope_theta.is_finite()
+                || meta.rope_theta <= 1.0
+                || !meta.rope_attn_factor.is_finite()
+                || meta.rope_attn_factor <= 0.0)
         {
             return Err(ParseError::BadTable);
         }
@@ -358,6 +400,7 @@ impl<'a> Model<'a> {
                 1 => TensorDtype::Q8_0,
                 2 => TensorDtype::Q4K,
                 3 => TensorDtype::Q6K,
+                4 if version >= 4 => TensorDtype::Q1_0,
                 _ => return Err(ParseError::BadTable),
             };
             let _pad = tc.u16();
@@ -381,7 +424,9 @@ impl<'a> Model<'a> {
             let n = (rows as u64)
                 .checked_mul(cols as u64)
                 .ok_or(ParseError::BadTable)?;
-            if dtype.byte_size(n) != Some(size) {
+            if dtype.byte_size(n) != Some(size)
+                || (dtype == TensorDtype::Q1_0 && !cols.is_multiple_of(128))
+            {
                 return Err(ParseError::BadTable);
             }
             entries.push(TensorEntry {

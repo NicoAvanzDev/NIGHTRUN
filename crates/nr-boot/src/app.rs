@@ -302,6 +302,11 @@ fn boot_sequence(
 
     // The converter writes the full display name incl. quant label.
     let model_name = alloc::format!("{}", model.meta.name_str());
+    let assistant = if tokenizer.template == nr_token::blob::Template::Bonsai {
+        "bonsai"
+    } else {
+        model.meta.arch.assistant_label()
+    };
     Platform {
         display,
         fonts,
@@ -316,7 +321,7 @@ fn boot_sequence(
         cores: workers as u32 + 1,
         pp_milli: 0,
         ftl_ms: 0,
-        assistant: model.meta.arch.assistant_label(),
+        assistant,
     }
 }
 

@@ -1,6 +1,6 @@
 //! Batched prefill must be bit-identical to sequential decode: same final
 //! logits AND an identical KV cache (proven by comparing the next decoded
-//! step). Runs against all three real models when present.
+//! step). Runs against all catalog model architectures when present.
 
 static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -84,6 +84,11 @@ fn prefill_bit_identity_granite() {
     check_model("granite-4.1-3b-q4km.nrm");
 }
 
+#[test]
+fn prefill_bit_identity_bonsai() {
+    check_model("bonsai-8b-q1.nrm");
+}
+
 /// Spec'd odd lengths around batch boundaries: every chunking shape must
 /// stay bit-identical to sequential decode (llama artifact; lengths
 /// beyond the prompt reuse wrapped ids — token values are irrelevant to
@@ -118,7 +123,9 @@ fn prefill_odd_lengths_bit_identity() {
         ids.extend(extend);
     }
 
-    for &len in &[1usize, 7, 15, 17, 31, 33, 63, 65, 127, 128, 129, 255, 257, 511, 512, 513] {
+    for &len in &[
+        1usize, 7, 15, 17, 31, 33, 63, 65, 127, 128, 129, 255, 257, 511, 512, 513,
+    ] {
         let prompt = &ids[..len];
         seq.reset();
         let mut seq_logits: Vec<f32> = Vec::new();

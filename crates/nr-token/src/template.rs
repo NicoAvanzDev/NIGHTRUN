@@ -31,6 +31,16 @@ impl<'a> Tokenizer<'a> {
     /// The generation header for `role` (everything up to where the model
     /// starts producing content).
     pub fn encode_header(&self, role: &str, out: &mut Vec<u32>) {
+        self.encode_role_header(role, out);
+        if self.template == Template::Bonsai && role == ROLE_ASSISTANT {
+            out.push(self.specials.end_header); // <think>
+            self.encode_text("\n\n", out);
+            out.push(self.specials.bos); // </think> (Bonsai has no BOS)
+            self.encode_text("\n\n", out);
+        }
+    }
+
+    fn encode_role_header(&self, role: &str, out: &mut Vec<u32>) {
         match self.template {
             Template::Llama3 => {
                 out.push(self.specials.start_header);
@@ -38,7 +48,7 @@ impl<'a> Tokenizer<'a> {
                 out.push(self.specials.end_header);
                 self.encode_text("\n\n", out);
             }
-            Template::ChatMl => {
+            Template::ChatMl | Template::Bonsai => {
                 out.push(self.specials.start_header); // <|im_start|>
                 self.encode_text(role, out);
                 self.encode_text("\n", out);
@@ -53,10 +63,13 @@ impl<'a> Tokenizer<'a> {
 
     /// One full message: header + content + end-of-turn.
     pub fn encode_message(&self, role: &str, content: &str, out: &mut Vec<u32>) {
-        self.encode_header(role, out);
+        self.encode_role_header(role, out);
         self.encode_text(content, out);
         out.push(self.specials.eot);
-        if matches!(self.template, Template::ChatMl | Template::Granite) {
+        if matches!(
+            self.template,
+            Template::ChatMl | Template::Bonsai | Template::Granite
+        ) {
             self.encode_text("\n", out);
         }
     }
